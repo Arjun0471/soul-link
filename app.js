@@ -726,9 +726,7 @@ function partnerLine(link, playerId) {
   return state.players.filter((p) => p.id !== playerId)
     .map((p) => {
       const other = link.encounters?.[p.id];
-      if (!other?.species) {
-        return `<button type="button" class="partner-missing" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(p.id)}" title="Add ${esc(p.name)}'s catch from ${esc(link.location)}">${icon('plus')}${esc(p.name)}'s catch</button>`;
-      }
+      if (!other?.species) return '';
       return `<span class="partner-mon">${miniSprite(other)}${esc(monName(other))}${other.inParty ? '' : '<em>box</em>'}</span>`;
     }).filter(Boolean).join('');
 }
