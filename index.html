@@ -135,6 +135,7 @@
   <dialog id="link-dialog">
     <form id="link-form" method="dialog">
       <h2 id="link-dialog-title">Add encounter</h2>
+      <div id="incomplete-pairs" class="incomplete-pairs" hidden></div>
       <label>Location
         <input name="location" required placeholder="Route 29" autocomplete="off">
       </label>
@@ -192,6 +193,30 @@
         <span class="spacer"></span>
         <button type="button" data-action="close-dialog">Cancel</button>
         <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="catch-dialog">
+    <form id="catch-form" method="dialog">
+      <h2 id="catch-title">Add catch</h2>
+      <div id="catch-linked"></div>
+      <div class="row">
+        <label>Pokémon
+          <input name="species" list="species-list" required autocomplete="off" placeholder="What did you catch?">
+        </label>
+        <label>Nickname
+          <input name="nickname" autocomplete="off">
+        </label>
+      </div>
+      <label class="checkbox">
+        <input type="checkbox" name="inParty">
+        <span id="catch-party-label">In party</span>
+      </label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="primary" data-icon="plus">Add catch</button>
       </div>
     </form>
   </dialog>

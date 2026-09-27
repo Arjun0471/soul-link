@@ -559,7 +559,10 @@ function renderMon(link, player, conflicts) {
   const enc = link.encounters?.[player.id];
   const head = (extra = '') => `<div class="mon-head">${avatar(player, 'sm')}<span class="owner">${esc(player.name)}</span>${extra}</div>`;
   if (!enc?.species) {
-    return `<div class="mon empty" style="${playerStyle(player.id)}">${head()}<span class="art placeholder">${icon('ball')}</span><div class="muted">No encounter</div></div>`;
+    const add = link.status === 'alive'
+      ? `<button type="button" class="add-catch" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(player.id)}">${icon('plus')}Add ${esc(player.name)}'s catch</button>`
+      : '<div class="muted">No encounter</div>';
+    return `<div class="mon empty${link.status === 'alive' ? ' waiting' : ''}" style="${playerStyle(player.id)}">${head()}<span class="art placeholder">${icon('ball')}</span>${add}</div>`;
   }
   const alive = link.status === 'alive';
   const fainted = link.status === 'dead' && (link.fainted === player.id || link.fainted === 'all');
@@ -606,9 +609,6 @@ function renderCard(link, conflicts) {
     .join(`<span class="chain" aria-hidden="true">${icon('link')}</span>`);
   const actions = [];
   if (link.status === 'alive') {
-    const encs = state.players.map((p) => link.encounters?.[p.id]).filter((e) => e?.species);
-    if (encs.length > 1 && encs.some((e) => !e.inParty)) actions.push(['pair-party', `${icon('up')}Pair to party`, 'ghost']);
-    if (encs.length > 1 && encs.some((e) => e.inParty)) actions.push(['pair-box', `${icon('down')}Pair to box`, 'ghost']);
     actions.push(['kill', `${icon('grave')}Fainted…`, 'ghost danger push']);
   }
   const cause = link.status === 'dead'
@@ -627,7 +627,9 @@ function partnerLine(link, playerId) {
   return state.players.filter((p) => p.id !== playerId)
     .map((p) => {
       const other = link.encounters?.[p.id];
-      if (!other?.species) return '';
+      if (!other?.species) {
+        return `<button type="button" class="partner-missing" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(p.id)}" title="Add ${esc(p.name)}'s catch from ${esc(link.location)}">${icon('plus')}${esc(p.name)}'s catch</button>`;
+      }
       return `<span class="partner-mon">${miniSprite(other)}${esc(monName(other))}${other.inParty ? '' : '<em>box</em>'}</span>`;
     }).filter(Boolean).join('');
 }
@@ -646,6 +648,7 @@ function slotHtml(link, player, conflicts) {
       <div class="slot-actions">
         ${moveButton(link.id, player.id, true)}
         ${evolveButton(link.id, player.id, enc)}
+        <button type="button" class="faint" data-action="kill" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(monName(enc))} fainted (the linked pair dies)">${icon('grave')}Fainted</button>
       </div>
     </div>`;
 }
@@ -753,7 +756,7 @@ function renderRecentRuns() {
 
 let editingId = null;
 
-function openLinkDialog(link, presetStatus) {
+function openLinkDialog(link, presetStatus, faintedPlayerId) {
   editingId = link?.id || null;
   const form = $('#link-form');
   form.reset();
@@ -790,11 +793,12 @@ function openLinkDialog(link, presetStatus) {
 
   form.location.value = link?.location || '';
   form.status.value = presetStatus || link?.status || 'alive';
-  form.fainted.value = link?.fainted || state.players[0]?.id || 'all';
+  form.fainted.value = faintedPlayerId || link?.fainted || state.players[0]?.id || 'all';
   form.cause.value = link?.cause || '';
   form.notes.value = link?.notes || '';
   updateDeathFields();
 
+  renderIncompleteShortcuts(link);
   $('#link-dialog').showModal();
   (presetStatus === 'dead' ? form.cause : form.location).focus();
 }
@@ -847,6 +851,80 @@ function saveLinkForm() {
   if (bumped.length && status === 'alive') {
     toast(`${bumped.join(' and ')}'s party is full, so that Pokémon went to the box.`);
   }
+}
+
+// ---------- completing a pair ----------
+
+// Living links where some player hasn't caught their half yet.
+function incompleteLinks() {
+  return state.links
+    .filter((link) => link.status === 'alive')
+    .map((link) => ({ link, missing: state.players.filter((p) => !link.encounters?.[p.id]?.species) }))
+    .filter(({ link, missing }) => missing.length && missing.length < state.players.length);
+}
+
+// In the Add encounter dialog: one-click shortcuts to finish half-caught pairs.
+function renderIncompleteShortcuts(editing) {
+  const box = $('#incomplete-pairs');
+  const pending = editing ? [] : incompleteLinks();
+  box.hidden = !pending.length;
+  box.innerHTML = pending.length ? `
+    <p class="shortcut-title">Waiting on a partner's catch</p>
+    <div class="shortcut-list">
+      ${pending.flatMap(({ link, missing }) => missing.map((p) => `
+        <button type="button" class="shortcut" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(p.id)}" style="${playerStyle(p.id)}">
+          ${avatar(p, 'sm')}<span><strong>${esc(link.location || 'Unknown location')}</strong><span class="muted">Add ${esc(p.name)}'s catch</span></span>
+        </button>`)).join('')}
+    </div>` : '';
+}
+
+let catching = null;
+
+function openCatchDialog(linkId, playerId) {
+  const link = state.links.find((l) => l.id === linkId);
+  const player = state.players.find((p) => p.id === playerId);
+  if (!link || !player) return;
+  $('#link-dialog').open && $('#link-dialog').close();
+  catching = { linkId, playerId };
+  const form = $('#catch-form');
+  form.reset();
+  $('#catch-title').textContent = `${player.name}'s catch at ${link.location || 'this location'}`;
+  const partners = state.players.filter((p) => p.id !== playerId && link.encounters?.[p.id]?.species);
+  $('#catch-linked').innerHTML = partners.map((p) => {
+    const enc = link.encounters[p.id];
+    return `<div class="linked-to${tint(enc)}" style="${playerStyle(p.id)}">${artHtml(enc, 'art sm')}<span>Linked to <strong>${esc(p.name)}'s ${esc(monName(enc))}</strong>${enc.nickname ? ` <span class="muted">(${esc(prettySpecies(enc.species))})</span>` : ''}</span></div>`;
+  }).join('');
+  // Follow the partner's placement when there's room.
+  const room = partyOf(playerId).length < PARTY_LIMIT;
+  const partnerInParty = partners.some((p) => link.encounters[p.id].inParty);
+  form.inParty.checked = room && (partnerInParty || !partners.length);
+  form.inParty.disabled = !room;
+  $('#catch-party-label').textContent = room
+    ? `In ${player.name}'s party`
+    : `${player.name}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}), goes to the box`;
+  $('#catch-dialog').showModal();
+  form.species.focus();
+}
+
+function saveCatch() {
+  const form = $('#catch-form');
+  const species = toSlug(form.species.value);
+  if (!catching || !species) return false;
+  const { linkId, playerId } = catching;
+  const link = state.links.find((l) => l.id === linkId);
+  if (!link) return false;
+  let inParty = form.inParty.checked;
+  // Re-checked on save: the partner may have filled the party meanwhile.
+  if (inParty && partyOf(playerId).length >= PARTY_LIMIT) {
+    inParty = false;
+    toast(`${playerName(playerId)}'s party is full, so it went to the box.`);
+  }
+  const enc = { species, nickname: form.nickname.value.trim(), inParty };
+  if (inParty) enc.partySince = Date.now();
+  // Writes only this player's half so it can't clobber a partner's edit.
+  store.write({ [`links/${linkId}/encounters/${playerId}`]: enc });
+  catching = null;
+  return true;
 }
 
 // ---------- evolve dialog ----------
@@ -1057,13 +1135,6 @@ function swapInto(outLinkId, inLinkId, playerId) {
   ]);
 }
 
-function movePair(link, inParty) {
-  const moves = state.players
-    .filter((p) => link.encounters?.[p.id]?.species)
-    .map((p) => ({ linkId: link.id, playerId: p.id, inParty }));
-  movePokemon(moves);
-}
-
 // ---------- drag and drop (desktop) ----------
 
 let dragged = null;
@@ -1113,11 +1184,10 @@ function handleAction(action, id, button) {
   switch (action) {
     case 'add': return openLinkDialog(null);
     case 'edit': return openLinkDialog(link);
-    case 'kill': return openLinkDialog(link, 'dead');
+    case 'kill': return openLinkDialog(link, 'dead', button.dataset.player);
+    case 'add-catch': return openCatchDialog(id, button.dataset.player);
     case 'to-party': return sendToParty(id, button.dataset.player);
     case 'to-box': return movePokemon([{ linkId: id, playerId: button.dataset.player, inParty: false }]);
-    case 'pair-party': return link && movePair(link, true);
-    case 'pair-box': return link && movePair(link, false);
     case 'swap-pick':
       if (swapping) swapInto(id, swapping.linkId, swapping.playerId);
       swapping = null;
@@ -1159,6 +1229,10 @@ function bindRunEvents() {
     event.preventDefault();
     saveLinkForm();
     $('#link-dialog').close();
+  });
+  $('#catch-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (saveCatch()) $('#catch-dialog').close();
   });
   $('#evolve-form').addEventListener('submit', (event) => {
     event.preventDefault();

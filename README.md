@@ -5,10 +5,11 @@ A shared tracker for Pokémon **Soul Link** Nuzlocke runs. Each encounter is lin
 - Each player has their own team panel: a 6-slot party with their box underneath. Linked partners don't both have to be in the party.
   - **↑ Party** / **↓ Box** on any Pokémon, or drag between party and box on desktop (drop onto a party member to swap them)
   - Sending a Pokémon to a full party asks who to swap out
-  - **Pair → party** / **Pair → box** moves a whole linked pair at once
+  - **Fainted** right from the party marks the linked pair dead (the Pokémon's owner is preselected as the one who fell)
   - A party can never hold more than 6. If you both add a 7th at the same moment on different machines, the newest arrival is boxed automatically.
 - **Evolve** appears on a Pokémon (in the party and on its encounter card) only when it has an evolution. A single evolution is preselected with a before/after preview; branching ones like Eevee get a dropdown. The nickname is kept along with a "caught as" note.
 - Alive, graveyard and failed-encounter lists; a death takes the whole linked pair
+- Half-caught pairs are easy to finish: **Add Sam's catch** on the encounter card or party slot, or pick it from the *Waiting on a partner's catch* list when adding an encounter. Only that player's half is written, so it never overwrites the partner's edits.
 - Sprites and types looked up automatically from [PokéAPI](https://pokeapi.co). Species autocomplete includes regional forms.
 - Warns when a player's party has two Pokémon with the same primary type (a common Soul Link rule; you can turn this off in Settings)
 - Records who fainted and the cause of death, plus notes on each encounter
