@@ -612,8 +612,10 @@ function renderMon(link, player, conflicts) {
   if (!enc?.species) {
     const add = link.status === 'alive'
       ? `<button type="button" class="add-catch" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="Add ${esc(player.name)}'s catch">${icon('plus')}Add catch</button>`
-      : '<div class="muted">No encounter</div>';
-    return `<div class="mon empty${link.status === 'alive' ? ' waiting' : ''}" style="${playerStyle(player.id)}">${head()}<span class="art placeholder">${icon('ball')}</span>${add}</div>`;
+      : link.status === 'dead'
+        ? '<div class="forfeit-label">Forfeited</div><div class="muted small">Link broke before a catch</div>'
+        : '<div class="muted">No encounter</div>';
+    return `<div class="mon empty${link.status === 'alive' ? ' waiting' : ''}${link.status === 'dead' ? ' forfeit' : ''}" style="${playerStyle(player.id)}">${head()}<span class="art placeholder">${icon('ball')}</span>${add}</div>`;
   }
   const alive = link.status === 'alive';
   const fainted = link.status === 'dead' && (link.fainted === player.id || link.fainted === 'all');
@@ -1549,7 +1551,9 @@ function openFaintDialog(linkId, playerId) {
     ? state.players.filter((p) => p.id === link.owner)
     : state.players.filter((p) => link.encounters?.[p.id]?.species);
   if (!members.length) return;
-  fainting = { linkId, solo, who: solo ? link.owner : (playerId || (members.length === 1 ? members[0].id : null)), busy: false };
+  // Partners who hadn't caught their half yet lose that encounter.
+  const missing = solo ? [] : state.players.filter((p) => !link.encounters?.[p.id]?.species);
+  fainting = { linkId, solo, missing: missing.map((p) => p.id), who: solo ? link.owner : (playerId || (members.length === 1 ? members[0].id : null)), busy: false };
   const dialog = $('#faint-dialog');
   dialog.classList.remove('fainting');
   $('#faint-form').reset();
@@ -1557,10 +1561,13 @@ function openFaintDialog(linkId, playerId) {
   const onlyMon = link.encounters[members[0].id];
   $('#faint-kicker').textContent = solo ? '✨ Shiny clause · not linked' : 'Soul link';
   $('#faint-title').textContent = solo ? `${monName(onlyMon)} fainted?` : 'Who fainted?';
+  const missingNames = missing.map((p) => p.name).join(' and ');
   $('#faint-sub').textContent = solo
     ? `${where}. It isn't soul-linked, so only it is lost.`
-    : `${where}. Tap the Pokémon that fell. Its soul-linked partner falls with it.`;
-  $('#faint-pair').innerHTML = members.map((p) => faintMonHtml(link, p))
+    : missing.length
+      ? `${where}. ${missingNames} hasn't caught their half yet, so their encounter here is forfeited.`
+      : `${where}. Tap the Pokémon that fell. Its soul-linked partner falls with it.`;
+  $('#faint-pair').innerHTML = [...members.map((p) => faintMonHtml(link, p)), ...missing.map(forfeitMonHtml)]
     .join(`<span class="faint-chain" aria-hidden="true">${icon('link')}</span>`);
   $('#faint-pair').classList.toggle('solo', members.length === 1);
   $('#faint-both').hidden = members.length < 2;
@@ -1570,6 +1577,17 @@ function openFaintDialog(linkId, playerId) {
   updateFaintSelection();
   dialog.showModal();
   (fainting.who ? $('#faint-form').cause : $('#faint-pair .faint-mon')).focus();
+}
+
+// The partner who never caught their half, shown as already lost.
+function forfeitMonHtml(player) {
+  return `
+    <div class="faint-mon forfeit" style="${playerStyle(player.id)}">
+      <span class="faint-owner">${avatar(player, 'sm')}${esc(player.name)}</span>
+      <span class="faint-art"><span class="art placeholder">${icon('ball')}</span></span>
+      <span class="nickname">Not caught yet</span>
+      <span class="faint-state">Forfeited</span>
+    </div>`;
 }
 
 function faintMonHtml(link, player) {
@@ -1585,7 +1603,7 @@ function faintMonHtml(link, player) {
 
 function updateFaintSelection() {
   const { who } = fainting;
-  document.querySelectorAll('#faint-pair .faint-mon').forEach((el) => {
+  document.querySelectorAll('#faint-pair .faint-mon:not(.forfeit)').forEach((el) => {
     const fell = who === 'all' || who === el.dataset.player;
     const dragged = Boolean(who) && !fell;
     el.classList.toggle('fell', fell);
@@ -1623,7 +1641,9 @@ async function confirmFaint() {
   const name = monName(link.encounters?.[solo ? link.owner : who] || Object.values(link.encounters || {})[0]);
   const pair = link.location ? `The ${link.location} pair` : 'The pair';
   const by = killer ? ` to ${prettySpecies(killer)}` : '';
-  undoToast(solo ? `💀 ${name} fell${by}. Rest in peace.` : `💀 ${pair} fell${by}. Rest in peace.`, link, 'death');
+  const forfeited = (fainting.missing || []).map(playerName).join(' and ');
+  const forfeitNote = forfeited ? ` ${forfeited}'s encounter here is forfeited.` : ' Rest in peace.';
+  undoToast(solo ? `💀 ${name} fell${by}. Rest in peace.` : `💀 ${pair} fell${by}.${forfeitNote}`, link, 'death');
   fainting = null;
 }
 

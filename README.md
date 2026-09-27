@@ -10,6 +10,7 @@ A shared tracker for Pokémon **Soul Link** Nuzlocke runs. Each encounter is lin
 - **Evolve** appears on a Pokémon (in the party and on its encounter card) only when it has an evolution. A single evolution is preselected with a before/after preview; branching ones like Eevee get a dropdown. The nickname is kept along with a "caught as" note.
 - Alive, graveyard and failed-encounter lists; a death takes the whole linked pair
 - **Waiting on a partner** section (above Linked encounters) collects half-caught pairs and disappears once every pair is complete.
+  - If a Pokémon faints before its partner is caught, the pair goes to the graveyard and the partner's encounter on that route is **forfeited** (the faint screen, toast and graveyard card all say so, and the route/type stays used).
 - **Shiny clause.** Add a shiny as a free extra catch for one player (*✨ Found a shiny?* in the Add encounter dialog): it isn't soul-linked, doesn't use up the route and dies alone. Any Pokémon can also be flagged ✨ shiny to show its shiny artwork. Can be switched off in Settings.
 - **Badges** in the header: click the badges you've earned to see the next gym.
 - **Undo** after a faint or deleting an encounter, a *who fell* tally and *deadliest foe* in the graveyard, and press **N** to add an encounter.

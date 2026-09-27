@@ -1360,3 +1360,12 @@ kbd { font: 700 0.75rem/1 ui-monospace, monospace; padding: 2px 6px; border: 1px
   font: 700 0.7rem/1.4 var(--font);
   white-space: nowrap;
 }
+
+/* Partner who never caught their half before the link broke */
+.faint-mon.forfeit { cursor: default; border-style: dashed; border-color: rgb(255 255 255 / 0.18); background: rgb(255 255 255 / 0.03); opacity: 0.7; }
+.faint-mon.forfeit:hover { transform: none; background-color: rgb(255 255 255 / 0.03); }
+.faint-mon.forfeit .art.placeholder { color: rgb(255 255 255 / 0.3); width: 80px; height: 80px; }
+.faint-mon.forfeit .faint-state { color: #ffb4b4; }
+.mon.forfeit { border-style: dashed; }
+.forfeit-label { font: 800 0.72rem/1 var(--font); letter-spacing: 0.08em; text-transform: uppercase; color: var(--danger); }
+.mon .small { font-size: 0.72rem; }
