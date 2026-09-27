@@ -79,12 +79,12 @@
         <div id="warnings" role="status"></div>
 
         <section class="group">
-          <h2>Party <span class="count" id="count-party"></span></h2>
-          <div class="cards" id="list-party"></div>
+          <h2>Parties</h2>
+          <div class="parties" id="parties"></div>
         </section>
         <section class="group">
-          <h2>Box <span class="count" id="count-box"></span></h2>
-          <div class="cards" id="list-box"></div>
+          <h2>Alive <span class="count" id="count-alive"></span></h2>
+          <div class="cards" id="list-alive"></div>
         </section>
         <section class="group">
           <h2>Graveyard <span class="count" id="count-dead"></span></h2>
@@ -107,8 +107,7 @@
       <div id="player-fields"></div>
       <label>Status
         <select name="status">
-          <option value="party">Party</option>
-          <option value="box">Box</option>
+          <option value="alive">Alive</option>
           <option value="dead">Dead</option>
           <option value="missed">Failed / skipped</option>
         </select>
@@ -159,6 +158,21 @@
         <span class="spacer"></span>
         <button type="button" data-action="close-dialog">Cancel</button>
         <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="evolve-dialog">
+    <form id="evolve-form" method="dialog">
+      <h2 id="evolve-title">Evolve</h2>
+      <div id="evolve-options" class="evolve-options"></div>
+      <label>Evolves into
+        <input name="species" list="species-list" required autocomplete="off" placeholder="Type a species">
+      </label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="primary">Evolve</button>
       </div>
     </form>
   </dialog>

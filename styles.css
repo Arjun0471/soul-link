@@ -194,15 +194,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
   gap: 8px;
   min-width: 0;
 }
-.card.status-party { border-left-color: var(--party); }
+.card.status-alive { border-left-color: var(--party); }
 .card.status-dead { border-left-color: var(--dead); }
 .card.status-missed { border-left-color: var(--missed); opacity: 0.8; }
-.card.clash { box-shadow: 0 0 0 1px var(--warn); }
 .card .location { font-weight: 600; }
 .card p { margin: 0; font-size: 0.88rem; }
 .card footer { display: flex; flex-wrap: wrap; gap: 6px; }
 .card footer button { padding: 4px 10px; font-size: 0.85rem; }
-.clash-note { color: var(--warn); }
+.clash-note { color: var(--warn); font-size: 0.75rem; font-weight: 600; }
 .cause { color: var(--danger); }
 .notes { color: var(--muted); white-space: pre-wrap; }
 
@@ -229,6 +228,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
   height: 56px;
   margin: 8px;
 }
+.mon.clash { box-shadow: inset 0 0 0 1px var(--warn); border-radius: 8px; }
+.mon-actions { display: flex; gap: 4px; margin-top: 4px; }
+.mon-actions button { padding: 2px 8px; font-size: 0.78rem; }
+.where { color: var(--box); }
+.where.in-party { color: var(--party); border-color: var(--party); font-weight: 600; }
 .mon.fainted img { filter: grayscale(1); opacity: 0.6; }
 .mon.empty { color: var(--muted); font-size: 0.85rem; }
 .owner { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -305,3 +309,36 @@ legend { font-weight: 600; padding: 0 4px; }
   .topbar { position: static; }
   .cards { grid-template-columns: 1fr; }
 }
+
+/* ---------- parties overview ---------- */
+
+.parties { display: grid; gap: 12px; }
+.party-row {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.party-row h3 { font-size: 1rem; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.count.over { color: var(--danger); border-color: var(--danger); }
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.slot {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+  padding: 6px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 120px;
+  min-width: 0;
+}
+.slot.open { border-style: dashed; opacity: 0.5; }
+.slot.clash { border-color: var(--warn); }
+.slot img, .slot .sprite-placeholder { width: 56px; height: 56px; margin: 0; }
+.slot .nickname { font-size: 0.88rem; }
+.partner { font-size: 0.75rem; color: var(--muted); overflow-wrap: anywhere; }
+
+.evolve-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.evolve-options p { margin: 0; }

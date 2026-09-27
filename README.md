@@ -2,7 +2,9 @@
 
 A shared tracker for Pokémon **Soul Link** Nuzlocke runs. Each encounter is linked to your partner's encounter on the same route: if one faints, both are dead. Both players open the same link, and every change shows up live on the other person's screen.
 
-- Party, box, graveyard and failed-encounter lists, with a 6-slot party counter
+- Each player has their own 6-slot party. Linked partners don't both have to be in the party: tap **Party/Box** on either Pokémon to move just that one.
+- **Evolve** button looks up the next stages from the evolution chain (e.g. Eevee's options) and keeps the nickname and a "caught as" note
+- Alive, graveyard and failed-encounter lists; a death takes the whole linked pair
 - Sprites and types looked up automatically from [PokéAPI](https://pokeapi.co). Species autocomplete includes regional forms.
 - Warns when a player's party has two Pokémon with the same primary type (a common Soul Link rule; you can turn this off in Settings)
 - Records who fainted and the cause of death, plus notes on each encounter
@@ -45,7 +47,7 @@ Every run lives at `runs/<runId>` in the database:
 ```
 runs/<runId>/meta        run name, game, rule toggles
 runs/<runId>/players/<playerId>   { name, order }
-runs/<runId>/links/<linkId>       { location, status, encounters: { <playerId>: { species, nickname, dexId, types } }, fainted, cause, notes }
+runs/<runId>/links/<linkId>       { location, status: alive|dead|missed, encounters: { <playerId>: { species, nickname, inParty, caughtAs, dexId, types } }, fainted, cause, notes }
 ```
 
 Each change writes only the fields it touches. If you both edit different encounters at the same time, both edits are kept.

@@ -6,10 +6,11 @@ const spriteUrl = (dexId) =>
   `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${dexId}.png`;
 
 const PARTY_LIMIT = 6;
-const STATUSES = ['party', 'box', 'dead', 'missed'];
+// A link is alive, dead or missed as a whole. Party vs box is tracked per
+// player on each encounter (`inParty`), since partners needn't both be in the party.
+const STATUSES = ['alive', 'dead', 'missed'];
 const EMPTY_TEXT = {
-  party: 'No one in the party yet.',
-  box: 'The box is empty.',
+  alive: 'No living Pokémon yet.',
   dead: 'Nobody has fallen. Yet.',
   missed: 'No failed encounters.',
 };
@@ -189,9 +190,21 @@ function normalize(raw) {
     .map(([id, p]) => ({ id, name: p.name || 'Player', order: p.order ?? 0 }))
     .sort((a, b) => a.order - b.order);
   const links = Object.entries(data.links || {})
-    .map(([id, link]) => ({ id, location: '', status: 'box', encounters: {}, ...link }))
+    .map(([id, link]) => normalizeLink(id, link))
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   return { exists: Boolean(data.meta), meta, players, links };
+}
+
+function normalizeLink(id, raw) {
+  const link = { id, location: '', status: 'alive', ...raw };
+  link.encounters = structuredClone(raw.encounters || {});
+  // Older runs stored party/box on the whole link.
+  if (link.status === 'party' || link.status === 'box') {
+    for (const enc of Object.values(link.encounters)) enc.inParty ??= link.status === 'party';
+    link.status = 'alive';
+  }
+  if (!STATUSES.includes(link.status)) link.status = 'alive';
+  return link;
 }
 
 function parseRunId(text) {
@@ -258,6 +271,23 @@ async function lookupPokemon(slug) {
   }
 }
 
+// Next stages in the evolution chain, e.g. "sentret" -> ["furret"].
+async function evolutionOptions(slug) {
+  try {
+    const pokemon = await fetchJson(`${POKEAPI}/pokemon/${slug}`);
+    const speciesName = pokemon?.species?.name || slug;
+    const species = await fetchJson(`${POKEAPI}/pokemon-species/${speciesName}`);
+    if (!species?.evolution_chain?.url) return [];
+    const chain = (await fetchJson(species.evolution_chain.url))?.chain;
+    const find = (node) => (node.species.name === speciesName
+      ? node : node.evolves_to.map(find).find(Boolean));
+    const node = chain && find(chain);
+    return node ? node.evolves_to.map((next) => next.species.name) : [];
+  } catch {
+    return [];
+  }
+}
+
 // ---------- app state ----------
 
 let store = null;
@@ -289,33 +319,39 @@ function resolveMissingPokemonData() {
 }
 
 function groupLinks() {
-  const groups = { party: [], box: [], dead: [], missed: [] };
-  for (const link of state.links) (groups[link.status] || groups.box).push(link);
+  const groups = { alive: [], dead: [], missed: [] };
+  for (const link of state.links) groups[link.status].push(link);
   return groups;
 }
 
+// One player's party: their living Pokémon flagged inParty.
+function partyOf(playerId) {
+  return state.links.filter((link) => {
+    const enc = link.encounters?.[playerId];
+    return link.status === 'alive' && enc?.species && enc.inParty;
+  });
+}
+
 // Common Soul Link rule: no two Pokémon in one player's party may share a primary type.
-function findTypeConflicts(partyLinks) {
-  const byLink = new Map();
+// Keys in byMon are "<linkId>/<playerId>".
+function findTypeConflicts() {
+  const byMon = new Map();
   const messages = [];
-  if (!state.meta.uniqueTypes) return { byLink, messages };
+  if (!state.meta.uniqueTypes) return { byMon, messages };
   for (const player of state.players) {
     const byType = {};
-    for (const link of partyLinks) {
-      const type = link.encounters?.[player.id]?.types?.[0];
+    for (const link of partyOf(player.id)) {
+      const type = link.encounters[player.id].types?.[0];
       if (type) (byType[type] ||= []).push(link);
     }
     for (const [type, links] of Object.entries(byType)) {
       if (links.length < 2) continue;
       const names = links.map((l) => monName(l.encounters[player.id]));
       messages.push(`${player.name}'s party has ${links.length} ${prettySpecies(type)}-type primaries: ${names.join(', ')}.`);
-      for (const link of links) {
-        if (!byLink.has(link.id)) byLink.set(link.id, []);
-        byLink.get(link.id).push(`${player.name}: ${prettySpecies(type)}`);
-      }
+      for (const link of links) byMon.set(`${link.id}/${player.id}`, prettySpecies(type));
     }
   }
-  return { byLink, messages };
+  return { byMon, messages };
 }
 
 const monName = (enc) => enc?.nickname || prettySpecies(enc?.species) || '—';
@@ -337,45 +373,87 @@ function renderSync(connected) {
   }
 }
 
-function renderMon(link, player) {
+function spriteHtml(enc) {
+  return enc.dexId
+    ? `<img src="${spriteUrl(enc.dexId)}" alt="" loading="lazy" onerror="this.remove()">`
+    : '<div class="sprite-placeholder">?</div>';
+}
+
+const typesHtml = (enc) =>
+  (enc.types || []).map((t) => `<span class="type t-${esc(t)}">${esc(t)}</span>`).join('');
+
+function renderMon(link, player, conflicts) {
   const enc = link.encounters?.[player.id];
   if (!enc?.species) {
     return `<div class="mon empty"><div class="owner">${esc(player.name)}</div><div class="muted">No encounter</div></div>`;
   }
+  const alive = link.status === 'alive';
   const fainted = link.status === 'dead' && (link.fainted === player.id || link.fainted === 'all');
-  const sprite = enc.dexId
-    ? `<img src="${spriteUrl(enc.dexId)}" alt="" loading="lazy" onerror="this.remove()">`
-    : '<div class="sprite-placeholder">?</div>';
-  const types = (enc.types || []).map((t) => `<span class="type t-${esc(t)}">${esc(t)}</span>`).join('');
-  const speciesLine = enc.nickname ? `<div class="species">${esc(prettySpecies(enc.species))}</div>` : '';
+  const clash = conflicts.byMon.get(`${link.id}/${player.id}`);
+  const species = prettySpecies(enc.species);
+  const speciesLine = enc.nickname || enc.caughtAs
+    ? `<div class="species">${esc(enc.nickname ? species : '')}${enc.caughtAs ? `${enc.nickname ? ' · ' : ''}caught as ${esc(prettySpecies(enc.caughtAs))}` : ''}</div>`
+    : '';
+  const controls = alive ? `
+      <div class="mon-actions">
+        <button type="button" class="where ${enc.inParty ? 'in-party' : ''}" data-action="toggle-party" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${enc.inParty ? 'Move to box' : 'Move to party'}">${enc.inParty ? 'Party' : 'Box'}</button>
+        <button type="button" data-action="evolve" data-id="${esc(link.id)}" data-player="${esc(player.id)}">Evolve</button>
+      </div>` : '';
   return `
-    <div class="mon${fainted ? ' fainted' : ''}">
+    <div class="mon${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}">
       <div class="owner">${esc(player.name)}${fainted ? ' <span title="Fainted">💀</span>' : ''}</div>
-      ${sprite}
+      ${spriteHtml(enc)}
       <div class="nickname">${esc(monName(enc))}</div>
       ${speciesLine}
-      <div class="types">${types}</div>
+      <div class="types">${typesHtml(enc)}</div>
+      ${clash ? `<div class="clash-note">${esc(clash)} clash</div>` : ''}
+      ${controls}
     </div>`;
 }
 
 function renderCard(link, conflicts) {
-  const mons = state.players.map((p) => renderMon(link, p)).join('<span class="chain" aria-hidden="true">⛓</span>');
-  const clash = conflicts.byLink.get(link.id);
+  const mons = state.players.map((p) => renderMon(link, p, conflicts)).join('<span class="chain" aria-hidden="true">⛓</span>');
   const actions = [];
-  if (link.status === 'party') actions.push(['to-box', 'To box']);
-  if (link.status === 'box') actions.push(['to-party', 'To party']);
-  if (link.status === 'party' || link.status === 'box') actions.push(['kill', 'Fainted…']);
+  if (link.status === 'alive') actions.push(['kill', 'Fainted…']);
   actions.push(['edit', 'Edit']);
   const cause = link.status === 'dead' && link.cause ? `<p class="cause">☠ ${esc(link.cause)}</p>` : '';
   return `
-    <article class="card status-${esc(link.status)}${clash ? ' clash' : ''}" data-id="${esc(link.id)}">
+    <article class="card status-${esc(link.status)}" data-id="${esc(link.id)}">
       <header><span class="location">${esc(link.location || 'Unknown location')}</span></header>
       <div class="pair">${mons}</div>
-      ${clash ? `<p class="clash-note">Type clash (${esc(clash.join('; '))})</p>` : ''}
       ${cause}
       ${link.notes ? `<p class="notes">${esc(link.notes)}</p>` : ''}
       <footer>${actions.map(([a, label]) => `<button type="button" data-action="${a}" data-id="${esc(link.id)}">${label}</button>`).join('')}</footer>
     </article>`;
+}
+
+function renderParties(conflicts) {
+  $('#parties').innerHTML = state.players.map((player) => {
+    const party = partyOf(player.id);
+    const slots = party.map((link) => {
+      const enc = link.encounters[player.id];
+      const partners = state.players.filter((p) => p.id !== player.id)
+        .map((p) => {
+          const other = link.encounters?.[p.id];
+          if (!other?.species) return '';
+          return `${esc(monName(other))}${other.inParty ? '' : ' <span class="muted">(box)</span>'}`;
+        }).filter(Boolean).join(', ');
+      const clash = conflicts.byMon.has(`${link.id}/${player.id}`);
+      return `
+        <div class="slot${clash ? ' clash' : ''}" title="${esc(link.location)}">
+          ${spriteHtml(enc)}
+          <div class="nickname">${esc(monName(enc))}</div>
+          <div class="types">${typesHtml(enc)}</div>
+          ${partners ? `<div class="partner">⛓ ${partners}</div>` : ''}
+        </div>`;
+    }).join('');
+    const empty = Array.from({ length: Math.max(0, PARTY_LIMIT - party.length) }, () => '<div class="slot open"></div>').join('');
+    return `
+      <div class="party-row">
+        <h3>${esc(player.name)} <span class="count${party.length > PARTY_LIMIT ? ' over' : ''}">${party.length}/${PARTY_LIMIT}</span></h3>
+        <div class="slots">${slots}${empty}</div>
+      </div>`;
+  }).join('');
 }
 
 function renderRun() {
@@ -391,28 +469,29 @@ function renderRun() {
   rememberRecent(runId, meta.runName);
 
   const groups = groupLinks();
-  const conflicts = findTypeConflicts(groups.party);
+  const conflicts = findTypeConflicts();
+  renderParties(conflicts);
   for (const status of STATUSES) {
     const links = groups[status];
-    $(`#count-${status}`).textContent = status === 'party' ? `${links.length}/${PARTY_LIMIT}` : links.length;
+    $(`#count-${status}`).textContent = links.length;
     $(`#list-${status}`).innerHTML = links.length
       ? links.map((l) => renderCard(l, conflicts)).join('')
       : `<p class="empty">${EMPTY_TEXT[status]}</p>`;
   }
 
-  const alive = groups.party.length + groups.box.length;
-  const caught = alive + groups.dead.length;
+  const caught = groups.alive.length + groups.dead.length;
   $('#stats').innerHTML = [
     ['Encounters', state.links.length],
-    ['Alive', alive],
+    ['Alive', groups.alive.length],
     ['Dead', groups.dead.length],
     ['Failed', groups.missed.length],
-    ['Survival', caught ? `${Math.round((alive / caught) * 100)}%` : '—'],
+    ['Survival', caught ? `${Math.round((groups.alive.length / caught) * 100)}%` : '—'],
   ].map(([label, value]) => `<div class="stat"><span class="value">${value}</span><span class="label">${label}</span></div>`).join('');
 
   const warnings = [...conflicts.messages];
-  if (groups.party.length > PARTY_LIMIT) {
-    warnings.unshift(`The party has ${groups.party.length} links. Only ${PARTY_LIMIT} fit.`);
+  for (const player of players) {
+    const size = partyOf(player.id).length;
+    if (size > PARTY_LIMIT) warnings.unshift(`${player.name}'s party has ${size} Pokémon. Only ${PARTY_LIMIT} fit.`);
   }
   $('#warnings').innerHTML = warnings.map((w) => `<p class="warning">⚠ ${esc(w)}</p>`).join('');
 
@@ -439,6 +518,8 @@ function openLinkDialog(link, presetStatus) {
 
   $('#player-fields').innerHTML = state.players.map((p) => {
     const enc = link?.encounters?.[p.id] || {};
+    // New catches go to the party while that player has room.
+    const inParty = link ? enc.inParty : partyOf(p.id).length < PARTY_LIMIT;
     return `
       <fieldset>
         <legend>${esc(p.name)}</legend>
@@ -450,6 +531,10 @@ function openLinkDialog(link, presetStatus) {
             <input name="nickname-${esc(p.id)}" value="${esc(enc.nickname)}" autocomplete="off">
           </label>
         </div>
+        <label class="checkbox">
+          <input type="checkbox" name="party-${esc(p.id)}"${inParty ? ' checked' : ''}>
+          In ${esc(p.name)}'s party
+        </label>
       </fieldset>`;
   }).join('');
 
@@ -457,9 +542,8 @@ function openLinkDialog(link, presetStatus) {
   faintedOptions.push('<option value="all">Both / all</option>');
   form.fainted.innerHTML = faintedOptions.join('');
 
-  const partyFull = groupLinks().party.length >= PARTY_LIMIT;
   form.location.value = link?.location || '';
-  form.status.value = presetStatus || link?.status || (partyFull ? 'box' : 'party');
+  form.status.value = presetStatus || link?.status || 'alive';
   form.fainted.value = link?.fainted || state.players[0]?.id || 'all';
   form.cause.value = link?.cause || '';
   form.notes.value = link?.notes || '';
@@ -483,8 +567,13 @@ function saveLinkForm() {
     const species = toSlug(form[`species-${p.id}`].value);
     if (!species) continue;
     const prev = existing?.encounters?.[p.id];
-    encounters[p.id] = { species, nickname: form[`nickname-${p.id}`].value.trim() };
-    // Keep looked-up sprite/types unless the species changed (e.g. it evolved).
+    encounters[p.id] = {
+      species,
+      nickname: form[`nickname-${p.id}`].value.trim(),
+      inParty: form[`party-${p.id}`].checked,
+    };
+    if (prev?.caughtAs && prev.caughtAs !== species) encounters[p.id].caughtAs = prev.caughtAs;
+    // Keep looked-up sprite/types unless the species changed.
     if (prev?.species === species && prev.types) {
       encounters[p.id].dexId = prev.dexId;
       encounters[p.id].types = prev.types;
@@ -504,6 +593,45 @@ function saveLinkForm() {
     link.cause = form.cause.value.trim();
   }
   store.write({ [`links/${id}`]: link });
+}
+
+// ---------- evolve dialog ----------
+
+let evolving = null;
+
+async function openEvolveDialog(linkId, playerId) {
+  const link = state.links.find((l) => l.id === linkId);
+  const enc = link?.encounters?.[playerId];
+  if (!enc?.species) return;
+  evolving = { linkId, playerId, species: enc.species };
+  const form = $('#evolve-form');
+  form.reset();
+  $('#evolve-title').textContent = `Evolve ${monName(enc)}${enc.nickname ? ` (${prettySpecies(enc.species)})` : ''}`;
+  const options = $('#evolve-options');
+  options.innerHTML = '<p class="muted">Looking up evolutions…</p>';
+  $('#evolve-dialog').showModal();
+  form.species.focus();
+
+  const next = await evolutionOptions(enc.species);
+  if (evolving?.linkId !== linkId || evolving.playerId !== playerId) return;
+  options.innerHTML = next.length
+    ? next.map((s) => `<button type="button" data-action="evolve-pick" data-species="${esc(s)}">${esc(prettySpecies(s))}</button>`).join('')
+    : '<p class="muted">No evolutions found. Type the species below if it evolves.</p>';
+  if (next.length === 1 && !form.species.value) form.species.value = prettySpecies(next[0]);
+}
+
+function saveEvolution(speciesInput) {
+  const species = toSlug(speciesInput);
+  if (!evolving || !species) return;
+  const { linkId, playerId } = evolving;
+  const enc = state.links.find((l) => l.id === linkId)?.encounters?.[playerId];
+  if (!enc || species === enc.species) return;
+  // dexId and types are dropped so the new form is looked up again.
+  const { dexId, types, ...rest } = enc;
+  store.write({
+    [`links/${linkId}/encounters/${playerId}`]: { ...rest, species, caughtAs: enc.caughtAs || enc.species },
+  });
+  toast(`${monName(enc)} evolved into ${prettySpecies(species)}!`);
 }
 
 // ---------- settings dialog ----------
@@ -602,16 +730,31 @@ async function copyShareLink() {
   }
 }
 
-function handleAction(action, id) {
+function toggleParty(link, playerId) {
+  const player = state.players.find((p) => p.id === playerId);
+  const joining = !link.encounters[playerId]?.inParty;
+  if (joining && partyOf(playerId).length >= PARTY_LIMIT) {
+    toast(`Heads up: ${player?.name || 'that'}'s party already has ${PARTY_LIMIT}.`);
+  }
+  // Writes every player's flag plus status so links saved by older versions are migrated too.
+  const patches = { [`links/${link.id}/status`]: 'alive' };
+  for (const [pid, enc] of Object.entries(link.encounters)) {
+    patches[`links/${link.id}/encounters/${pid}/inParty`] = pid === playerId ? joining : Boolean(enc.inParty);
+  }
+  store.write(patches);
+}
+
+function handleAction(action, id, button) {
   const link = state.links.find((l) => l.id === id);
   switch (action) {
     case 'add': return openLinkDialog(null);
     case 'edit': return openLinkDialog(link);
     case 'kill': return openLinkDialog(link, 'dead');
-    case 'to-box': return store.write({ [`links/${id}/status`]: 'box' });
-    case 'to-party':
-      if (groupLinks().party.length >= PARTY_LIMIT) toast(`Heads up: the party already has ${PARTY_LIMIT}.`);
-      return store.write({ [`links/${id}/status`]: 'party' });
+    case 'toggle-party': return link && toggleParty(link, button.dataset.player);
+    case 'evolve': return openEvolveDialog(id, button.dataset.player);
+    case 'evolve-pick':
+      saveEvolution(button.dataset.species);
+      return $('#evolve-dialog').close();
     case 'share': return copyShareLink();
     case 'settings': return openSettings();
     case 'export': return exportRun();
@@ -636,12 +779,17 @@ function handleAction(action, id) {
 function bindRunEvents() {
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-action]');
-    if (button) handleAction(button.dataset.action, button.dataset.id);
+    if (button) handleAction(button.dataset.action, button.dataset.id, button);
   });
   $('#link-form').addEventListener('submit', (event) => {
     event.preventDefault();
     saveLinkForm();
     $('#link-dialog').close();
+  });
+  $('#evolve-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveEvolution(event.target.species.value);
+    $('#evolve-dialog').close();
   });
   $('#link-form').status.addEventListener('change', updateDeathFields);
   $('#settings-form').addEventListener('submit', (event) => {
