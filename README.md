@@ -7,7 +7,7 @@ A shared tracker for Pokémon **Soul Link** Nuzlocke runs. Each encounter is lin
   - Sending a Pokémon to a full party asks who to swap out
   - **Pair → party** / **Pair → box** moves a whole linked pair at once
   - A party can never hold more than 6. If you both add a 7th at the same moment on different machines, the newest arrival is boxed automatically.
-- **Evolve** button looks up the next stages from the evolution chain (e.g. Eevee's options) and keeps the nickname and a "caught as" note
+- **Evolve** appears on a Pokémon (in the party and on its encounter card) only when it has an evolution. A single evolution is preselected with a before/after preview; branching ones like Eevee get a dropdown. The nickname is kept along with a "caught as" note.
 - Alive, graveyard and failed-encounter lists; a death takes the whole linked pair
 - Sprites and types looked up automatically from [PokéAPI](https://pokeapi.co). Species autocomplete includes regional forms.
 - Warns when a player's party has two Pokémon with the same primary type (a common Soul Link rule; you can turn this off in Settings)

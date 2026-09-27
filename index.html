@@ -199,14 +199,18 @@
   <dialog id="evolve-dialog">
     <form id="evolve-form" method="dialog">
       <h2 id="evolve-title">Evolve</h2>
-      <div id="evolve-options" class="evolve-options"></div>
-      <label>Evolves into
-        <input name="species" list="species-list" required autocomplete="off" placeholder="Type a species">
+      <div id="evolve-preview" class="evolve-preview"></div>
+      <label id="evolve-choice" hidden>Evolves into
+        <select name="evolveTo"></select>
+      </label>
+      <label id="evolve-other" hidden>Species
+        <input name="species" list="species-list" autocomplete="off" placeholder="Type a species">
       </label>
       <div class="dialog-actions">
+        <button type="button" class="ghost" id="evolve-other-toggle" data-action="evolve-other" hidden>Different species?</button>
         <span class="spacer"></span>
         <button type="button" data-action="close-dialog">Cancel</button>
-        <button type="submit" class="primary">Evolve</button>
+        <button type="submit" class="primary" data-icon="spark">Evolve</button>
       </div>
     </form>
   </dialog>

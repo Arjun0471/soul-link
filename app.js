@@ -18,6 +18,7 @@ const KEYS = {
   recent: 'slt:recent-runs',
   speciesList: 'slt:species-list',
   pokemonCache: 'slt:pokemon-cache',
+  evolutionCache: 'slt:evolution-cache',
   localRun: (id) => `slt:run:${id}`,
 };
 
@@ -272,21 +273,61 @@ async function lookupPokemon(slug) {
   }
 }
 
-// Next stages in the evolution chain, e.g. "sentret" -> ["furret"].
+// Next stages in the evolution chain, e.g. "sentret" -> ["furret"], "eevee" -> 8 options.
+// Resolves [] when fully evolved and null when the lookup failed.
 async function evolutionOptions(slug) {
   try {
     const pokemon = await fetchJson(`${POKEAPI}/pokemon/${slug}`);
     const speciesName = pokemon?.species?.name || slug;
     const species = await fetchJson(`${POKEAPI}/pokemon-species/${speciesName}`);
-    if (!species?.evolution_chain?.url) return [];
+    if (!species) return null;
+    if (!species.evolution_chain?.url) return [];
     const chain = (await fetchJson(species.evolution_chain.url))?.chain;
+    if (!chain) return null;
     const find = (node) => (node.species.name === speciesName
       ? node : node.evolves_to.map(find).find(Boolean));
-    const node = chain && find(chain);
+    const node = find(chain);
     return node ? node.evolves_to.map((next) => next.species.name) : [];
   } catch {
-    return [];
+    return null;
   }
+}
+
+// Evolution options per species, cached so Evolve buttons can appear only
+// for Pokémon that actually have an evolution.
+const evolutionCache = lsGet(KEYS.evolutionCache, {});
+const evolutionLookups = new Set();
+
+async function loadEvolutions(slug) {
+  if (evolutionCache[slug]) return evolutionCache[slug];
+  const next = await evolutionOptions(slug);
+  if (next) {
+    evolutionCache[slug] = next;
+    lsSet(KEYS.evolutionCache, evolutionCache);
+  }
+  return next;
+}
+
+function prefetchEvolutions() {
+  for (const link of state.links) {
+    if (link.status !== 'alive') continue;
+    for (const enc of Object.values(link.encounters || {})) {
+      const slug = enc?.species;
+      if (!slug || evolutionCache[slug] || evolutionLookups.has(slug)) continue;
+      evolutionLookups.add(slug);
+      loadEvolutions(slug).then((next) => { if (next?.length) scheduleRender(); });
+    }
+  }
+}
+
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    renderRun();
+  });
 }
 
 // ---------- app state ----------
@@ -499,6 +540,14 @@ function speciesLine(enc) {
   return parts.length ? `<div class="species">${parts.join(' · ')}</div>` : '';
 }
 
+// Shown only once we know this species has somewhere to evolve to.
+function evolveButton(linkId, playerId, enc) {
+  const next = evolutionCache[enc.species];
+  if (!next?.length) return '';
+  const hint = next.length === 1 ? `Evolve into ${prettySpecies(next[0])}` : `Evolve (${next.length} options)`;
+  return `<button type="button" class="evolve" data-action="evolve" data-id="${esc(linkId)}" data-player="${esc(playerId)}" title="${esc(hint)}">${icon('spark')}Evolve</button>`;
+}
+
 function moveButton(linkId, playerId, inParty, compact = false) {
   const attrs = `data-id="${esc(linkId)}" data-player="${esc(playerId)}"`;
   return inParty
@@ -521,7 +570,7 @@ function renderMon(link, player, conflicts) {
   const controls = alive ? `
       <div class="mon-actions">
         ${moveButton(link.id, player.id, enc.inParty)}
-        <button type="button" class="ghost" data-action="evolve" data-id="${esc(link.id)}" data-player="${esc(player.id)}">${icon('spark')}Evolve</button>
+        ${evolveButton(link.id, player.id, enc)}
       </div>` : '';
   return `
     <div class="mon${tint(enc)}${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}" style="${playerStyle(player.id)}">
@@ -594,7 +643,10 @@ function slotHtml(link, player, conflicts) {
       ${speciesLine(enc)}
       ${typesHtml(enc)}
       ${partners ? `<div class="partner" title="Soul-linked partner">${icon('link')}${partners}</div>` : ''}
-      ${moveButton(link.id, player.id, true)}
+      <div class="slot-actions">
+        ${moveButton(link.id, player.id, true)}
+        ${evolveButton(link.id, player.id, enc)}
+      </div>
     </div>`;
 }
 
@@ -687,6 +739,7 @@ function renderRun() {
   $('#warnings').innerHTML = conflicts.messages.map((w) => `<p class="warning">${esc(w)}</p>`).join('');
 
   resolveMissingPokemonData();
+  prefetchEvolutions();
 }
 
 function renderRecentRuns() {
@@ -799,40 +852,85 @@ function saveLinkForm() {
 // ---------- evolve dialog ----------
 
 let evolving = null;
+const OTHER = '__other';
 
 async function openEvolveDialog(linkId, playerId) {
   const link = state.links.find((l) => l.id === linkId);
   const enc = link?.encounters?.[playerId];
   if (!enc?.species) return;
-  evolving = { linkId, playerId, species: enc.species };
+  evolving = { linkId, playerId };
   const form = $('#evolve-form');
   form.reset();
-  $('#evolve-title').textContent = `Evolve ${monName(enc)}${enc.nickname ? ` (${prettySpecies(enc.species)})` : ''}`;
-  const options = $('#evolve-options');
-  options.innerHTML = '<p class="muted">Looking up evolutions…</p>';
+  $('#evolve-title').textContent = `Evolve ${monName(enc)}`;
+  $('#evolve-other').hidden = true;
+  $('#evolve-choice').hidden = true;
+  $('#evolve-other-toggle').hidden = true;
+  $('#evolve-preview').innerHTML = `${previewMon(enc)}<span class="evolve-arrow">${icon('spark')}</span><div class="preview-mon muted">Looking up evolutions…</div>`;
   $('#evolve-dialog').showModal();
-  form.species.focus();
 
-  const next = await evolutionOptions(enc.species);
+  const next = (await loadEvolutions(enc.species)) || [];
   if (evolving?.linkId !== linkId || evolving.playerId !== playerId) return;
-  options.innerHTML = next.length
-    ? next.map((s) => `<button type="button" data-action="evolve-pick" data-species="${esc(s)}">${esc(prettySpecies(s))}</button>`).join('')
-    : '<p class="muted">No evolutions found. Type the species below if it evolves.</p>';
-  if (next.length === 1 && !form.species.value) form.species.value = prettySpecies(next[0]);
+  const select = form.evolveTo;
+  select.innerHTML = next.map((s) => `<option value="${esc(s)}">${esc(prettySpecies(s))}</option>`).join('')
+    + `<option value="${OTHER}">Other species…</option>`;
+  select.value = next[0] || OTHER;
+  // A single evolution is simply preselected; several get a dropdown.
+  $('#evolve-choice').hidden = next.length < 2;
+  $('#evolve-other-toggle').hidden = next.length !== 1;
+  if (!next.length) showOtherSpecies();
+  updateEvolvePreview();
 }
 
-function saveEvolution(speciesInput) {
-  const species = toSlug(speciesInput);
-  if (!evolving || !species) return;
+function previewMon(enc, label = '') {
+  return `
+    <div class="preview-mon${tint(enc)}">
+      ${artHtml(enc)}
+      <div class="nickname">${esc(label || prettySpecies(enc.species))}</div>
+      ${typesHtml(enc)}
+    </div>`;
+}
+
+function showOtherSpecies() {
+  const form = $('#evolve-form');
+  form.evolveTo.value = OTHER;
+  $('#evolve-other').hidden = false;
+  $('#evolve-other-toggle').hidden = true;
+  form.species.focus();
+  updateEvolvePreview();
+}
+
+async function updateEvolvePreview() {
+  if (!evolving) return;
   const { linkId, playerId } = evolving;
   const enc = state.links.find((l) => l.id === linkId)?.encounters?.[playerId];
-  if (!enc || species === enc.species) return;
+  const target = $('#evolve-form').evolveTo.value;
+  if (target !== OTHER) $('#evolve-other').hidden = true;
+  const preview = $('#evolve-preview');
+  if (!enc) return;
+  if (target === OTHER) {
+    preview.innerHTML = previewMon(enc);
+    return;
+  }
+  const info = (await lookupPokemon(target)) || {};
+  if ($('#evolve-form').evolveTo.value !== target) return;
+  preview.innerHTML = `${previewMon(enc)}<span class="evolve-arrow">${icon('spark')}</span>${previewMon({ species: target, ...info })}`;
+}
+
+function saveEvolution() {
+  const form = $('#evolve-form');
+  const choice = form.evolveTo.value;
+  const species = toSlug(choice === OTHER ? form.species.value : choice);
+  if (!evolving || !species) return false;
+  const { linkId, playerId } = evolving;
+  const enc = state.links.find((l) => l.id === linkId)?.encounters?.[playerId];
+  if (!enc || species === enc.species) return false;
   // dexId and types are dropped so the new form is looked up again.
   const { dexId, types, ...rest } = enc;
   store.write({
     [`links/${linkId}/encounters/${playerId}`]: { ...rest, species, caughtAs: enc.caughtAs || enc.species },
   });
   toast(`${monName(enc)} evolved into ${prettySpecies(species)}!`);
+  return true;
 }
 
 // ---------- settings dialog ----------
@@ -1025,9 +1123,7 @@ function handleAction(action, id, button) {
       swapping = null;
       return $('#swap-dialog').close();
     case 'evolve': return openEvolveDialog(id, button.dataset.player);
-    case 'evolve-pick':
-      saveEvolution(button.dataset.species);
-      return $('#evolve-dialog').close();
+    case 'evolve-other': return showOtherSpecies();
     case 'share': return copyShareLink();
     case 'jump': return document.getElementById(button.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     case 'settings': return openSettings();
@@ -1066,8 +1162,12 @@ function bindRunEvents() {
   });
   $('#evolve-form').addEventListener('submit', (event) => {
     event.preventDefault();
-    saveEvolution(event.target.species.value);
-    $('#evolve-dialog').close();
+    if (saveEvolution()) $('#evolve-dialog').close();
+    else if (event.target.evolveTo.value === OTHER) event.target.species.focus();
+  });
+  $('#evolve-form').evolveTo.addEventListener('change', (event) => {
+    if (event.target.value === OTHER) showOtherSpecies();
+    else updateEvolvePreview();
   });
   $('#link-form').status.addEventListener('change', updateDeathFields);
   $('#settings-form').addEventListener('submit', (event) => {

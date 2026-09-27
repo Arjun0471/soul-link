@@ -445,7 +445,9 @@ main { max-width: 1240px; margin: 0 auto; padding: 20px 20px 80px; }
 .slot.open .icon { width: 30px; height: 30px; stroke-width: 1.5; }
 .slot .nickname { font-weight: 700; font-size: 0.95rem; line-height: 1.2; overflow-wrap: anywhere; }
 .slot .species { font-size: 0.75rem; color: var(--muted); }
-.slot .move { margin-top: 6px; }
+.slot-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 6px; }
+button.evolve { padding: 5px 10px; font-size: 0.76rem; color: #a855f7; border-color: color-mix(in srgb, #a855f7 40%, var(--border)); }
+button.evolve:hover { background: color-mix(in srgb, #a855f7 10%, var(--surface)); }
 
 .art {
   width: 84px;
@@ -747,9 +749,22 @@ legend { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; 
 .dialog-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 .spacer { flex: 1; }
 
-.evolve-options, .swap-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-.evolve-options p { grid-column: 1 / -1; }
-.evolve-options button { padding: 14px 10px; border-radius: 14px; font-size: 0.95rem; }
+.swap-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.evolve-preview { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.preview-mon {
+  flex: 0 1 180px;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  text-align: center;
+}
+.preview-mon.muted { border-style: dashed; place-content: center; min-height: 150px; font-size: 0.85rem; }
+.preview-mon .nickname { font: 700 1rem/1.2 var(--display); }
+.evolve-arrow { color: #a855f7; display: grid; place-items: center; }
+.evolve-arrow .icon { width: 26px; height: 26px; }
 .swap-option {
   display: grid;
   justify-items: center;
