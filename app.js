@@ -263,8 +263,16 @@ async function loadSpeciesList() {
       return; // Offline: species can still be typed by hand.
     }
   }
-  $('#species-list').innerHTML = names
-    .map((n) => `<option value="${esc(prettySpecies(n))}">`).join('');
+  mergeSpeciesOptions(names);
+}
+
+function mergeSpeciesOptions(slugs) {
+  const list = $('#species-list');
+  const have = new Set([...list.options].map((o) => o.value));
+  list.insertAdjacentHTML('beforeend', slugs
+    .map(prettySpecies)
+    .filter((name) => !have.has(name) && have.add(name))
+    .map((name) => `<option value="${esc(name)}">`).join(''));
 }
 
 const pokemonCache = lsGet(KEYS.pokemonCache, {});
@@ -365,6 +373,12 @@ const lookupsAttempted = new Set();
 // Fills in sprite/type data for encounters that don't have it yet. Whoever
 // sees it first writes it to the shared run, so the partner gets it too.
 function resolveMissingPokemonData() {
+  for (const link of state.links) {
+    const slug = link.killer;
+    if (!slug || killerDex(slug) || lookupsAttempted.has(`killer/${slug}`)) continue;
+    lookupsAttempted.add(`killer/${slug}`);
+    lookupPokemon(slug).then((info) => info && scheduleRender());
+  }
   for (const link of state.links) {
     for (const player of state.players) {
       const enc = link.encounters?.[player.id];
@@ -646,7 +660,7 @@ function renderCard(link, conflicts) {
     <article class="card shiny-catch status-${esc(link.status)}${justFell(link) ? ' just-fell' : ''}" data-id="${esc(link.id)}">
       <header><span class="loc">✨ ${esc(link.location || 'Shiny clause')}</span><span class="clause-tag">Shiny clause · not linked</span>${edit}</header>
       <div class="pair solo">${renderMon(link, owner, conflicts)}</div>
-      ${link.status === 'dead' ? `<p class="epitaph">${link.cause ? esc(link.cause) : 'Fell in battle.'}</p>` : ''}
+      ${link.status === 'dead' ? epitaphHtml(link) : ''}
       ${link.notes ? `<p class="notes">${esc(link.notes)}</p>` : ''}
       ${link.status === 'alive' ? `<footer><button type="button" class="ghost danger push" data-action="kill" data-id="${esc(link.id)}">${icon('grave')}Fainted…</button></footer>` : ''}
     </article>`;
@@ -659,7 +673,7 @@ function renderCard(link, conflicts) {
     actions.push(['kill', `${icon('grave')}Fainted…`, 'ghost danger push']);
   }
   const cause = link.status === 'dead'
-    ? `<p class="epitaph">${link.cause ? esc(link.cause) : 'Fell in battle.'}</p>` : '';
+    ? epitaphHtml(link) : '';
   return `
     <article class="card status-${esc(link.status)}${justFell(link) ? ' just-fell' : ''}" data-id="${esc(link.id)}">
       <header>${location}${edit}</header>
@@ -668,6 +682,43 @@ function renderCard(link, conflicts) {
       ${link.notes ? `<p class="notes">${esc(link.notes)}</p>` : ''}
       ${actions.length ? `<footer>${actions.map(([a, label, cls]) => `<button type="button" class="${cls}" data-action="${a}" data-id="${esc(link.id)}">${label}</button>`).join('')}</footer>` : ''}
     </article>`;
+}
+
+// Sprite for the Pokémon that did it, from route data or the PokéAPI cache.
+function killerDex(slug) {
+  return knownPokemon(slug)?.dexId || pokemonCache[slug]?.dexId || null;
+}
+
+function killerHtml(slug) {
+  const dex = killerDex(slug);
+  const sprite = dex ? `<img class="mini" src="${spriteUrl(dex)}" alt="" loading="lazy" onerror="this.remove()">` : '';
+  return `<span class="killer">${sprite}${esc(prettySpecies(slug))}</span>`;
+}
+
+function epitaphHtml(link) {
+  const parts = [];
+  if (link.killer) parts.push(`<span class="killed-by">Killed by</span>${killerHtml(link.killer)}`);
+  if (link.cause) parts.push(`<span class="cause-text">${esc(link.cause)}</span>`);
+  return `<p class="epitaph">${parts.length ? parts.join('<span class="sep">·</span>') : 'Fell in battle.'}</p>`;
+}
+
+// Live sprite next to a "Which Pokémon did it?" field.
+function updateKillerPreview(input) {
+  const preview = input.closest('.killer-input')?.querySelector('.killer-preview');
+  if (!preview) return;
+  const slug = toSlug(input.value);
+  const dex = slug && killerDex(slug);
+  preview.innerHTML = dex ? `<img src="${spriteUrl(dex)}" alt="">` : '';
+  if (slug && !dex) {
+    lookupPokemon(slug).then((info) => {
+      if (info && toSlug(input.value) === slug) preview.innerHTML = `<img src="${spriteUrl(info.dexId)}" alt="">`;
+    });
+  }
+}
+
+function setKiller(form, slug) {
+  form.killer.value = slug ? prettySpecies(slug) : '';
+  updateKillerPreview(form.killer);
 }
 
 function partnerLine(link, playerId) {
@@ -832,8 +883,12 @@ function renderGraveyardTally(dead) {
   }
   const el = $('#dead-tally');
   el.hidden = !dead.length;
+  const killers = new Map();
+  for (const link of dead) if (link.killer) killers.set(link.killer, (killers.get(link.killer) || 0) + 1);
+  const [deadliest, kills] = [...killers].sort((a, b) => b[1] - a[1])[0] || [];
   el.innerHTML = dead.length
     ? `Who fell: ${state.players.map((p) => `<span class="tally" style="${playerStyle(p.id)}">${avatar(p, 'sm')}${esc(p.name)} <strong>${counts.get(p.id)}</strong></span>`).join('')}`
+      + (kills > 1 ? `<span class="deadliest">Deadliest foe: ${killerHtml(deadliest)} <strong>×${kills}</strong></span>` : '')
     : '';
 }
 
@@ -888,6 +943,7 @@ function loadGameFile(file) {
         data.bySpecies = new Map();
         for (const loc of data.locations) for (const p of loc.pokemon) data.bySpecies.set(p.species, p);
         gameData.set(file, data);
+        mergeSpeciesOptions([...data.bySpecies.keys()]);
         return data;
       })
       .catch(() => null));
@@ -1187,6 +1243,7 @@ function openLinkDialog(link, presetStatus, faintedPlayerId) {
   form.status.value = presetStatus || link?.status || 'alive';
   form.fainted.value = faintedPlayerId || link?.fainted || state.players[0]?.id || 'all';
   form.cause.value = link?.cause || '';
+  setKiller(form, link?.killer);
   form.notes.value = link?.notes || '';
   updateDeathFields();
 
@@ -1243,6 +1300,8 @@ function saveLinkForm() {
   if (status === 'dead') {
     link.fainted = form.fainted.value;
     link.cause = form.cause.value.trim();
+    const killer = toSlug(form.killer.value);
+    if (killer) link.killer = killer;
   }
   if (status === 'dead' && existing?.status !== 'dead') {
     localFaints.add(id);
@@ -1379,6 +1438,7 @@ function openFaintDialog(linkId, playerId) {
     .join(`<span class="faint-chain" aria-hidden="true">${icon('link')}</span>`);
   $('#faint-pair').classList.toggle('solo', members.length === 1);
   $('#faint-both').hidden = members.length < 2;
+  setKiller($('#faint-form'), '');
   $('#faint-causes').innerHTML = FAINT_CAUSES
     .map((c) => `<button type="button" class="cause-chip" data-action="faint-cause" data-cause="${esc(c)}">${esc(c)}</button>`).join('');
   updateFaintSelection();
@@ -1419,6 +1479,7 @@ async function confirmFaint() {
   fainting.busy = true;
   const { who, solo } = fainting;
   const cause = $('#faint-form').cause.value.trim();
+  const killer = toSlug($('#faint-form').killer.value);
   const dialog = $('#faint-dialog');
   dialog.classList.add('fainting');
   flashScreen();
@@ -1429,12 +1490,14 @@ async function confirmFaint() {
     [`links/${link.id}/status`]: 'dead',
     [`links/${link.id}/fainted`]: who,
     [`links/${link.id}/cause`]: cause || null,
+    [`links/${link.id}/killer`]: killer || null,
     [`links/${link.id}/diedAt`]: Date.now(),
   });
   dialog.close();
   const name = monName(link.encounters?.[solo ? link.owner : who] || Object.values(link.encounters || {})[0]);
   const pair = link.location ? `The ${link.location} pair` : 'The pair';
-  undoToast(solo ? `💀 ${name} fainted. Rest in peace.` : `💀 ${pair} has fallen. Rest in peace.`, link, 'death');
+  const by = killer ? ` to ${prettySpecies(killer)}` : '';
+  undoToast(solo ? `💀 ${name} fell${by}. Rest in peace.` : `💀 ${pair} fell${by}. Rest in peace.`, link, 'death');
   fainting = null;
 }
 
@@ -1444,7 +1507,8 @@ function announceRemoteDeaths(links) {
   flashScreen();
   const text = links.map((link) => {
     const names = Object.entries(link.encounters || {}).map(([, enc]) => monName(enc)).join(' & ');
-    return `${link.location || 'A pair'}: ${names}${link.cause ? ` (${link.cause})` : ''}`;
+    const detail = [link.killer && `to ${prettySpecies(link.killer)}`, link.cause].filter(Boolean).join(', ');
+    return `${link.location || 'A pair'}: ${names}${detail ? ` (${detail})` : ''}`;
   }).join(' · ');
   toast(`💀 Fallen: ${text}`, null, 'death');
 }
@@ -1468,6 +1532,7 @@ function openShinyDialog(link, presetStatus) {
   form.nickname.value = enc.nickname || '';
   form.status.value = presetStatus || link?.status || 'alive';
   form.cause.value = link?.cause || '';
+  setKiller(form, link?.killer);
   form.notes.value = link?.notes || '';
   form.querySelector('[data-action="delete-shiny"]').hidden = !link;
   renderShinyFields({ species: enc.species || '', inParty: link ? enc.inParty : true });
@@ -1535,6 +1600,8 @@ function saveShiny() {
   if (status === 'dead') {
     link.fainted = owner;
     link.cause = form.cause.value.trim();
+    const killer = toSlug(form.killer.value);
+    if (killer) link.killer = killer;
   }
   if (status === 'dead' && existing?.status !== 'dead') {
     localFaints.add(id);
@@ -1932,6 +1999,7 @@ function bindRunEvents() {
   });
   document.addEventListener('input', (event) => {
     if (event.target.matches('.picker-filter')) filterPicker(event.target);
+    if (event.target.name === 'killer') updateKillerPreview(event.target);
   });
   document.addEventListener('keydown', (event) => {
     const picker = event.target.closest?.('.picker');

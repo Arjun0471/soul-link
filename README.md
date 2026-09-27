@@ -5,14 +5,14 @@ A shared tracker for Pokémon **Soul Link** Nuzlocke runs. Each encounter is lin
 - Each player has their own team panel: a 6-slot party with their box underneath. Linked partners don't both have to be in the party.
   - **↑ Party** / **↓ Box** on any Pokémon, or drag between party and box on desktop (drop onto a party member to swap them)
   - Sending a Pokémon to a full party asks who to swap out
-  - **Fainted** (in the party or on a card) opens a dedicated faint screen: tap the Pokémon that fell (its partner is dragged down with it), pick a cause, confirm. The screen flashes, the pair sinks out of view, the chain snaps and the card lands in the graveyard. Your partner gets a flash and a 💀 alert when it syncs.
+  - **Fainted** (in the party or on a card) opens a dedicated faint screen: tap the Pokémon that fell (its partner is dragged down with it), optionally name the Pokémon that did it (with a live sprite), pick a cause, confirm. The screen flashes, the pair sinks out of view, the chain snaps and the card lands in the graveyard. Your partner gets a flash and a 💀 alert when it syncs.
   - A party can never hold more than 6. If you both add a 7th at the same moment on different machines, the newest arrival is boxed automatically.
 - **Evolve** appears on a Pokémon (in the party and on its encounter card) only when it has an evolution. A single evolution is preselected with a before/after preview; branching ones like Eevee get a dropdown. The nickname is kept along with a "caught as" note.
 - Alive, graveyard and failed-encounter lists; a death takes the whole linked pair
 - **Waiting on a partner** section (above Linked encounters) collects half-caught pairs and disappears once every pair is complete.
 - **Shiny clause.** Add a shiny as a free extra catch for one player (*✨ Found a shiny?* in the Add encounter dialog): it isn't soul-linked, doesn't use up the route and dies alone. Any Pokémon can also be flagged ✨ shiny to show its shiny artwork. Can be switched off in Settings.
 - **Badges** in the header: click the badges you've earned to see the next gym.
-- **Undo** after a faint or deleting an encounter, a *who fell* tally in the graveyard, and press **N** to add an encounter.
+- **Undo** after a faint or deleting an encounter, a *who fell* tally and *deadliest foe* in the graveyard, and press **N** to add an encounter.
 - Half-caught pairs are easy to finish: **Add Sam's catch** on the encounter card or party slot, or pick it from the *Waiting on a partner's catch* list when adding an encounter. Only that player's half is written, so it never overwrites the partner's edits.
 - **Route lookup for Omega Ruby / Alpha Sapphire.** Set what each player is playing (home screen or Settings → *Playing*). The Location field becomes a dropdown of Hoenn locations in story order (visited ones marked ✓ done), and each player gets a dropdown of what *their* version can catch there: sprite, types, how (Grass, Tall grass, Horde, DexNav, Surfing, rods, Rock Smash, gifts, legendaries), level range, version exclusives (*AS only* / *OR only*) and a *caught before* hint. Type to filter; **Other species…** / **Other location…** are always available.
 - Sprites and types looked up automatically from [PokéAPI](https://pokeapi.co). Species autocomplete includes regional forms.
@@ -57,7 +57,7 @@ Every run lives at `runs/<runId>` in the database:
 ```
 runs/<runId>/meta        run name, game, rule toggles, badges
 runs/<runId>/players/<playerId>   { name, order, version }
-runs/<runId>/links/<linkId>       { location, status: alive|dead|missed, clause?: 'shiny', owner?, encounters: { <playerId>: { species, nickname, inParty, shiny, caughtAs, dexId, types } }, fainted, cause, notes }
+runs/<runId>/links/<linkId>       { location, status: alive|dead|missed, clause?: 'shiny', owner?, encounters: { <playerId>: { species, nickname, inParty, shiny, caughtAs, dexId, types } }, fainted, killer, cause, notes }
 ```
 
 Each change writes only the fields it touches. If you both edit different encounters at the same time, both edits are kept.

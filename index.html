@@ -175,6 +175,9 @@
         <label>Who fainted?
           <select name="fainted"></select>
         </label>
+        <label class="killer-field"><span>Which Pokémon did it? <span class="muted">(optional)</span></span>
+          <span class="killer-input"><span class="killer-preview" aria-hidden="true"></span><input name="killer" list="species-list" placeholder="e.g. Makuhita" autocomplete="off"></span>
+        </label>
         <label>Cause of death
           <input name="cause" placeholder="Crit from Whitney's Miltank" autocomplete="off">
         </label>
@@ -280,9 +283,14 @@
           <option value="dead">Fainted</option>
         </select>
       </label>
-      <label class="shiny-death">Cause of death
-        <input name="cause" autocomplete="off">
-      </label>
+      <div class="shiny-death death-fields">
+        <label class="killer-field"><span>Which Pokémon did it? <span class="muted">(optional)</span></span>
+          <span class="killer-input"><span class="killer-preview" aria-hidden="true"></span><input name="killer" list="species-list" placeholder="e.g. Makuhita" autocomplete="off"></span>
+        </label>
+        <label>Cause of death
+          <input name="cause" autocomplete="off">
+        </label>
+      </div>
       <label>Notes
         <textarea name="notes" rows="2"></textarea>
       </label>
@@ -335,6 +343,9 @@
       </div>
       <div class="faint-pair" id="faint-pair"></div>
       <button type="button" class="faint-both" id="faint-both" data-action="faint-pick" data-player="all">💀 Both fell at once</button>
+      <label class="killer-field faint-killer"><span>Which Pokémon did it? <span class="muted">(optional)</span></span>
+          <span class="killer-input"><span class="killer-preview" aria-hidden="true"></span><input name="killer" list="species-list" placeholder="e.g. Makuhita" autocomplete="off"></span>
+        </label>
       <label class="faint-cause">What happened?
         <input name="cause" placeholder="e.g. Crit from Brawly's Makuhita" autocomplete="off">
       </label>
