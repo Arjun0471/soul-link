@@ -202,6 +202,7 @@ function normalizeLink(id, raw) {
   if (link.status === 'party' || link.status === 'box') {
     for (const enc of Object.values(link.encounters)) enc.inParty ??= link.status === 'party';
     link.status = 'alive';
+    link.legacyStatus = true;
   }
   if (!STATUSES.includes(link.status)) link.status = 'alive';
   return link;
@@ -332,6 +333,77 @@ function partyOf(playerId) {
   });
 }
 
+function boxOf(playerId) {
+  return state.links.filter((link) => {
+    const enc = link.encounters?.[playerId];
+    return link.status === 'alive' && enc?.species && !enc.inParty;
+  });
+}
+
+const playerName = (playerId) => state.players.find((p) => p.id === playerId)?.name || 'That player';
+
+// Every party/box change goes through here, so no party can ever exceed PARTY_LIMIT.
+// `moves` is a list of { linkId, playerId, inParty }; applied together (for swaps)
+// or not at all. Returns false when refused.
+function movePokemon(moves) {
+  const sizes = Object.fromEntries(state.players.map((p) => [p.id, partyOf(p.id).length]));
+  const joining = new Set();
+  const patches = {};
+  for (const { linkId, playerId, inParty } of moves) {
+    const link = state.links.find((l) => l.id === linkId);
+    const enc = link?.encounters?.[playerId];
+    if (!enc?.species || link.status !== 'alive' || Boolean(enc.inParty) === inParty) continue;
+    sizes[playerId] += inParty ? 1 : -1;
+    if (inParty) joining.add(playerId);
+    if (link.legacyStatus) {
+      // Links saved before per-player parties: store every flag explicitly.
+      patches[`links/${linkId}/status`] = 'alive';
+      for (const [pid, other] of Object.entries(link.encounters)) {
+        patches[`links/${linkId}/encounters/${pid}/inParty`] ??= Boolean(other.inParty);
+      }
+    }
+    patches[`links/${linkId}/encounters/${playerId}/inParty`] = inParty;
+    if (inParty) patches[`links/${linkId}/encounters/${playerId}/partySince`] = Date.now();
+  }
+  const full = [...joining].filter((pid) => sizes[pid] > PARTY_LIMIT);
+  if (full.length) {
+    toast(`${full.map(playerName).join(' and ')}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}). Box someone first.`);
+    return false;
+  }
+  if (Object.keys(patches).length) store.write(patches);
+  return true;
+}
+
+function sendToParty(linkId, playerId) {
+  if (partyOf(playerId).length >= PARTY_LIMIT) return openSwapDialog(linkId, playerId);
+  return movePokemon([{ linkId, playerId, inParty: true }]);
+}
+
+// Safety net for simultaneous edits on two machines (each saw room for one
+// more). Keeps the six that joined first and boxes the newest arrivals; every
+// client picks the same ones, so their fixes agree.
+function enforcePartyLimit() {
+  const patches = {};
+  const boxed = [];
+  const rank = (link, pid) => [link.encounters[pid].partySince || 0, link.createdAt || 0, link.id];
+  for (const player of state.players) {
+    const party = partyOf(player.id);
+    if (party.length <= PARTY_LIMIT) continue;
+    party.sort((a, b) => {
+      const [x, y] = [rank(a, player.id), rank(b, player.id)];
+      return x[0] - y[0] || x[1] - y[1] || (x[2] < y[2] ? -1 : 1);
+    });
+    for (const link of party.slice(PARTY_LIMIT)) {
+      patches[`links/${link.id}/encounters/${player.id}/inParty`] = false;
+      boxed.push(`${player.name}'s ${monName(link.encounters[player.id])}`);
+    }
+  }
+  if (!boxed.length) return false;
+  store.write(patches);
+  toast(`Parties hold ${PARTY_LIMIT}: moved ${boxed.join(', ')} to the box.`);
+  return true;
+}
+
 // Common Soul Link rule: no two Pokémon in one player's party may share a primary type.
 // Keys in byMon are "<linkId>/<playerId>".
 function findTypeConflicts() {
@@ -396,12 +468,12 @@ function renderMon(link, player, conflicts) {
     : '';
   const controls = alive ? `
       <div class="mon-actions">
-        <button type="button" class="where ${enc.inParty ? 'in-party' : ''}" data-action="toggle-party" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${enc.inParty ? 'Move to box' : 'Move to party'}">${enc.inParty ? 'Party' : 'Box'}</button>
+        ${moveButton(link.id, player.id, enc.inParty)}
         <button type="button" data-action="evolve" data-id="${esc(link.id)}" data-player="${esc(player.id)}">Evolve</button>
       </div>` : '';
   return `
     <div class="mon${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}">
-      <div class="owner">${esc(player.name)}${fainted ? ' <span title="Fainted">💀</span>' : ''}</div>
+      <div class="owner">${esc(player.name)}${fainted ? ' <span title="Fainted">💀</span>' : ''}${alive ? ` <span class="where ${enc.inParty ? 'party' : 'box'}">${enc.inParty ? 'Party' : 'Box'}</span>` : ''}</div>
       ${spriteHtml(enc)}
       <div class="nickname">${esc(monName(enc))}</div>
       ${speciesLine}
@@ -414,7 +486,12 @@ function renderMon(link, player, conflicts) {
 function renderCard(link, conflicts) {
   const mons = state.players.map((p) => renderMon(link, p, conflicts)).join('<span class="chain" aria-hidden="true">⛓</span>');
   const actions = [];
-  if (link.status === 'alive') actions.push(['kill', 'Fainted…']);
+  if (link.status === 'alive') {
+    const encs = state.players.map((p) => link.encounters?.[p.id]).filter((e) => e?.species);
+    if (encs.length > 1 && encs.some((e) => !e.inParty)) actions.push(['pair-party', 'Pair → party']);
+    if (encs.length > 1 && encs.some((e) => e.inParty)) actions.push(['pair-box', 'Pair → box']);
+    actions.push(['kill', 'Fainted…']);
+  }
   actions.push(['edit', 'Edit']);
   const cause = link.status === 'dead' && link.cause ? `<p class="cause">☠ ${esc(link.cause)}</p>` : '';
   return `
@@ -427,31 +504,53 @@ function renderCard(link, conflicts) {
     </article>`;
 }
 
-function renderParties(conflicts) {
+function moveButton(linkId, playerId, inParty) {
+  return inParty
+    ? `<button type="button" class="move to-box" data-action="to-box" data-id="${esc(linkId)}" data-player="${esc(playerId)}" title="Move to the box">↓ Box</button>`
+    : `<button type="button" class="move to-party" data-action="to-party" data-id="${esc(linkId)}" data-player="${esc(playerId)}" title="Move to the party">↑ Party</button>`;
+}
+
+function partnerLine(link, playerId) {
+  return state.players.filter((p) => p.id !== playerId)
+    .map((p) => {
+      const other = link.encounters?.[p.id];
+      if (!other?.species) return '';
+      return `${esc(monName(other))}${other.inParty ? '' : ' <span class="muted">(box)</span>'}`;
+    }).filter(Boolean).join(', ');
+}
+
+function slotHtml(link, player, conflicts) {
+  const enc = link.encounters[player.id];
+  const partners = partnerLine(link, player.id);
+  const clash = conflicts.byMon.has(`${link.id}/${player.id}`);
+  return `
+    <div class="slot${clash ? ' clash' : ''}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
+      ${spriteHtml(enc)}
+      <div class="nickname">${esc(monName(enc))}</div>
+      <div class="types">${typesHtml(enc)}</div>
+      ${partners ? `<div class="partner">⛓ ${partners}</div>` : ''}
+      ${moveButton(link.id, player.id, enc.inParty)}
+    </div>`;
+}
+
+// One panel per player: their party (6 slots) with their box underneath.
+// Slots can be dragged between the two on desktop; buttons work everywhere.
+function renderTeams(conflicts) {
   $('#parties').innerHTML = state.players.map((player) => {
     const party = partyOf(player.id);
-    const slots = party.map((link) => {
-      const enc = link.encounters[player.id];
-      const partners = state.players.filter((p) => p.id !== player.id)
-        .map((p) => {
-          const other = link.encounters?.[p.id];
-          if (!other?.species) return '';
-          return `${esc(monName(other))}${other.inParty ? '' : ' <span class="muted">(box)</span>'}`;
-        }).filter(Boolean).join(', ');
-      const clash = conflicts.byMon.has(`${link.id}/${player.id}`);
-      return `
-        <div class="slot${clash ? ' clash' : ''}" title="${esc(link.location)}">
-          ${spriteHtml(enc)}
-          <div class="nickname">${esc(monName(enc))}</div>
-          <div class="types">${typesHtml(enc)}</div>
-          ${partners ? `<div class="partner">⛓ ${partners}</div>` : ''}
-        </div>`;
-    }).join('');
-    const empty = Array.from({ length: Math.max(0, PARTY_LIMIT - party.length) }, () => '<div class="slot open"></div>').join('');
+    const box = boxOf(player.id);
+    const open = Array.from({ length: Math.max(0, PARTY_LIMIT - party.length) },
+      () => '<div class="slot open"><span>Empty</span></div>').join('');
     return `
-      <div class="party-row">
-        <h3>${esc(player.name)} <span class="count${party.length > PARTY_LIMIT ? ' over' : ''}">${party.length}/${PARTY_LIMIT}</span></h3>
-        <div class="slots">${slots}${empty}</div>
+      <div class="team">
+        <h3>${esc(player.name)}'s party <span class="count${party.length >= PARTY_LIMIT ? ' full' : ''}">${party.length}/${PARTY_LIMIT}</span></h3>
+        <div class="slots drop" data-drop="party" data-player="${esc(player.id)}">
+          ${party.map((link) => slotHtml(link, player, conflicts)).join('')}${open}
+        </div>
+        <h4>Box <span class="count">${box.length}</span></h4>
+        <div class="slots box-slots drop" data-drop="box" data-player="${esc(player.id)}">
+          ${box.length ? box.map((link) => slotHtml(link, player, conflicts)).join('') : '<p class="empty">Box is empty.</p>'}
+        </div>
       </div>`;
   }).join('');
 }
@@ -468,9 +567,12 @@ function renderRun() {
   $('#run-meta').textContent = [meta.game, players.map((p) => p.name).join(' ⛓ ')].filter(Boolean).join(' · ');
   rememberRecent(runId, meta.runName);
 
+  // A fix-up write re-renders through the subscription, so stop here.
+  if (enforcePartyLimit()) return;
+
   const groups = groupLinks();
   const conflicts = findTypeConflicts();
-  renderParties(conflicts);
+  renderTeams(conflicts);
   for (const status of STATUSES) {
     const links = groups[status];
     $(`#count-${status}`).textContent = links.length;
@@ -488,11 +590,7 @@ function renderRun() {
     ['Survival', caught ? `${Math.round((groups.alive.length / caught) * 100)}%` : '—'],
   ].map(([label, value]) => `<div class="stat"><span class="value">${value}</span><span class="label">${label}</span></div>`).join('');
 
-  const warnings = [...conflicts.messages];
-  for (const player of players) {
-    const size = partyOf(player.id).length;
-    if (size > PARTY_LIMIT) warnings.unshift(`${player.name}'s party has ${size} Pokémon. Only ${PARTY_LIMIT} fit.`);
-  }
+  const warnings = conflicts.messages;
   $('#warnings').innerHTML = warnings.map((w) => `<p class="warning">⚠ ${esc(w)}</p>`).join('');
 
   resolveMissingPokemonData();
@@ -518,8 +616,10 @@ function openLinkDialog(link, presetStatus) {
 
   $('#player-fields').innerHTML = state.players.map((p) => {
     const enc = link?.encounters?.[p.id] || {};
+    const alreadyIn = link?.status === 'alive' && enc.species && enc.inParty;
+    const room = alreadyIn || partyOf(p.id).length < PARTY_LIMIT;
     // New catches go to the party while that player has room.
-    const inParty = link ? enc.inParty : partyOf(p.id).length < PARTY_LIMIT;
+    const inParty = room && (link ? enc.inParty : true);
     return `
       <fieldset>
         <legend>${esc(p.name)}</legend>
@@ -532,8 +632,8 @@ function openLinkDialog(link, presetStatus) {
           </label>
         </div>
         <label class="checkbox">
-          <input type="checkbox" name="party-${esc(p.id)}"${inParty ? ' checked' : ''}>
-          In ${esc(p.name)}'s party
+          <input type="checkbox" name="party-${esc(p.id)}"${inParty ? ' checked' : ''}${room ? '' : ' disabled'}>
+          ${room ? `In ${esc(p.name)}'s party` : `${esc(p.name)}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}), goes to the box`}
         </label>
       </fieldset>`;
   }).join('');
@@ -562,16 +662,22 @@ function saveLinkForm() {
   const form = $('#link-form');
   const existing = state.links.find((l) => l.id === editingId);
   const id = editingId || newId();
+  const status = form.status.value;
   const encounters = {};
+  const bumped = [];
   for (const p of state.players) {
     const species = toSlug(form[`species-${p.id}`].value);
     if (!species) continue;
     const prev = existing?.encounters?.[p.id];
-    encounters[p.id] = {
-      species,
-      nickname: form[`nickname-${p.id}`].value.trim(),
-      inParty: form[`party-${p.id}`].checked,
-    };
+    const wasIn = existing?.status === 'alive' && prev?.species && prev.inParty;
+    let inParty = form[`party-${p.id}`].checked;
+    // Re-checked on save: the partner may have filled the party meanwhile.
+    if (inParty && !wasIn && partyOf(p.id).length >= PARTY_LIMIT) {
+      inParty = false;
+      bumped.push(p.name);
+    }
+    encounters[p.id] = { species, nickname: form[`nickname-${p.id}`].value.trim(), inParty };
+    if (inParty) encounters[p.id].partySince = (wasIn && prev.partySince) || Date.now();
     if (prev?.caughtAs && prev.caughtAs !== species) encounters[p.id].caughtAs = prev.caughtAs;
     // Keep looked-up sprite/types unless the species changed.
     if (prev?.species === species && prev.types) {
@@ -579,7 +685,6 @@ function saveLinkForm() {
       encounters[p.id].types = prev.types;
     }
   }
-  const status = form.status.value;
   const link = {
     location: form.location.value.trim(),
     status,
@@ -593,6 +698,9 @@ function saveLinkForm() {
     link.cause = form.cause.value.trim();
   }
   store.write({ [`links/${id}`]: link });
+  if (bumped.length && status === 'alive') {
+    toast(`${bumped.join(' and ')}'s party is full, so that Pokémon went to the box.`);
+  }
 }
 
 // ---------- evolve dialog ----------
@@ -688,7 +796,7 @@ function saveSettings() {
 
 function exportRun() {
   const players = Object.fromEntries(state.players.map(({ id, name, order }) => [id, { name, order }]));
-  const links = Object.fromEntries(state.links.map(({ id, ...rest }) => [id, rest]));
+  const links = Object.fromEntries(state.links.map(({ id, legacyStatus, ...rest }) => [id, rest]));
   const payload = {
     format: 'soul-link-tracker',
     version: 1,
@@ -730,18 +838,83 @@ async function copyShareLink() {
   }
 }
 
-function toggleParty(link, playerId) {
-  const player = state.players.find((p) => p.id === playerId);
-  const joining = !link.encounters[playerId]?.inParty;
-  if (joining && partyOf(playerId).length >= PARTY_LIMIT) {
-    toast(`Heads up: ${player?.name || 'that'}'s party already has ${PARTY_LIMIT}.`);
-  }
-  // Writes every player's flag plus status so links saved by older versions are migrated too.
-  const patches = { [`links/${link.id}/status`]: 'alive' };
-  for (const [pid, enc] of Object.entries(link.encounters)) {
-    patches[`links/${link.id}/encounters/${pid}/inParty`] = pid === playerId ? joining : Boolean(enc.inParty);
-  }
-  store.write(patches);
+// ---------- swap dialog ----------
+
+let swapping = null;
+
+function openSwapDialog(linkId, playerId) {
+  const incoming = state.links.find((l) => l.id === linkId)?.encounters?.[playerId];
+  if (!incoming) return;
+  swapping = { linkId, playerId };
+  $('#swap-title').textContent = `${playerName(playerId)}'s party is full. Swap in ${monName(incoming)}?`;
+  $('#swap-options').innerHTML = partyOf(playerId).map((link) => {
+    const enc = link.encounters[playerId];
+    return `
+      <button type="button" class="swap-option" data-action="swap-pick" data-id="${esc(link.id)}">
+        ${spriteHtml(enc)}
+        <span class="nickname">${esc(monName(enc))}</span>
+        <span class="types">${typesHtml(enc)}</span>
+      </button>`;
+  }).join('');
+  $('#swap-dialog').showModal();
+}
+
+function swapInto(outLinkId, inLinkId, playerId) {
+  return movePokemon([
+    { linkId: outLinkId, playerId, inParty: false },
+    { linkId: inLinkId, playerId, inParty: true },
+  ]);
+}
+
+function movePair(link, inParty) {
+  const moves = state.players
+    .filter((p) => link.encounters?.[p.id]?.species)
+    .map((p) => ({ linkId: link.id, playerId: p.id, inParty }));
+  movePokemon(moves);
+}
+
+// ---------- drag and drop (desktop) ----------
+
+let dragged = null;
+
+function bindDragAndDrop() {
+  const root = $('#parties');
+  root.addEventListener('dragstart', (event) => {
+    const slot = event.target.closest('.slot[data-id]');
+    if (!slot) return;
+    dragged = { linkId: slot.dataset.id, playerId: slot.dataset.player };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', dragged.linkId);
+    slot.classList.add('dragging');
+  });
+  root.addEventListener('dragend', () => {
+    dragged = null;
+    root.querySelectorAll('.dragging, .drag-over').forEach((el) => el.classList.remove('dragging', 'drag-over'));
+  });
+  root.addEventListener('dragover', (event) => {
+    const zone = event.target.closest('.drop');
+    // Pokémon only move within their own player's party and box.
+    if (!dragged || !zone || zone.dataset.player !== dragged.playerId) return;
+    event.preventDefault();
+    root.querySelectorAll('.drag-over').forEach((el) => el !== zone && el.classList.remove('drag-over'));
+    zone.classList.add('drag-over');
+  });
+  root.addEventListener('drop', (event) => {
+    const zone = event.target.closest('.drop');
+    if (!dragged || !zone || zone.dataset.player !== dragged.playerId) return;
+    event.preventDefault();
+    const { linkId, playerId } = dragged;
+    const inParty = Boolean(state.links.find((l) => l.id === linkId)?.encounters?.[playerId]?.inParty);
+    if (zone.dataset.drop === 'box') {
+      if (inParty) movePokemon([{ linkId, playerId, inParty: false }]);
+      return;
+    }
+    if (inParty) return;
+    // Dropped onto a party member: swap the two.
+    const target = event.target.closest('.slot[data-id]');
+    if (target && target.dataset.id !== linkId) swapInto(target.dataset.id, linkId, playerId);
+    else sendToParty(linkId, playerId);
+  });
 }
 
 function handleAction(action, id, button) {
@@ -750,7 +923,14 @@ function handleAction(action, id, button) {
     case 'add': return openLinkDialog(null);
     case 'edit': return openLinkDialog(link);
     case 'kill': return openLinkDialog(link, 'dead');
-    case 'toggle-party': return link && toggleParty(link, button.dataset.player);
+    case 'to-party': return sendToParty(id, button.dataset.player);
+    case 'to-box': return movePokemon([{ linkId: id, playerId: button.dataset.player, inParty: false }]);
+    case 'pair-party': return link && movePair(link, true);
+    case 'pair-box': return link && movePair(link, false);
+    case 'swap-pick':
+      if (swapping) swapInto(id, swapping.linkId, swapping.playerId);
+      swapping = null;
+      return $('#swap-dialog').close();
     case 'evolve': return openEvolveDialog(id, button.dataset.player);
     case 'evolve-pick':
       saveEvolution(button.dataset.species);
@@ -777,6 +957,7 @@ function handleAction(action, id, button) {
 }
 
 function bindRunEvents() {
+  bindDragAndDrop();
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-action]');
     if (button) handleAction(button.dataset.action, button.dataset.id, button);

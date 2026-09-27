@@ -2,7 +2,11 @@
 
 A shared tracker for Pokémon **Soul Link** Nuzlocke runs. Each encounter is linked to your partner's encounter on the same route: if one faints, both are dead. Both players open the same link, and every change shows up live on the other person's screen.
 
-- Each player has their own 6-slot party. Linked partners don't both have to be in the party: tap **Party/Box** on either Pokémon to move just that one.
+- Each player has their own team panel: a 6-slot party with their box underneath. Linked partners don't both have to be in the party.
+  - **↑ Party** / **↓ Box** on any Pokémon, or drag between party and box on desktop (drop onto a party member to swap them)
+  - Sending a Pokémon to a full party asks who to swap out
+  - **Pair → party** / **Pair → box** moves a whole linked pair at once
+  - A party can never hold more than 6. If you both add a 7th at the same moment on different machines, the newest arrival is boxed automatically.
 - **Evolve** button looks up the next stages from the evolution chain (e.g. Eevee's options) and keeps the nickname and a "caught as" note
 - Alive, graveyard and failed-encounter lists; a death takes the whole linked pair
 - Sprites and types looked up automatically from [PokéAPI](https://pokeapi.co). Species autocomplete includes regional forms.

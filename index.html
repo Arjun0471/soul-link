@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Soul Link Tracker</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.png" type="image/png" sizes="180x180">
+  <link rel="apple-touch-icon" href="favicon.png">
+  <meta name="theme-color" content="#6b4fd8">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -79,7 +83,7 @@
         <div id="warnings" role="status"></div>
 
         <section class="group">
-          <h2>Parties</h2>
+          <h2>Teams</h2>
           <div class="parties" id="parties"></div>
         </section>
         <section class="group">
@@ -173,6 +177,18 @@
         <span class="spacer"></span>
         <button type="button" data-action="close-dialog">Cancel</button>
         <button type="submit" class="primary">Evolve</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="swap-dialog">
+    <form method="dialog">
+      <h2 id="swap-title">Party is full</h2>
+      <p class="muted">Pick who goes to the box to make room.</p>
+      <div id="swap-options" class="swap-options"></div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" data-action="close-dialog">Cancel</button>
       </div>
     </form>
   </dialog>
