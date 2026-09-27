@@ -607,11 +607,8 @@ function renderMon(link, player, conflicts) {
   const badge = (enc.shiny ? '<span class="where shiny-badge" title="Shiny">✨</span>' : '') + (alive
     ? `<span class="where ${enc.inParty ? 'party' : 'box'}">${enc.inParty ? 'Party' : 'Box'}</span>`
     : fainted ? `<span class="where fainted-badge">${icon('grave')}Fainted</span>` : '');
-  const controls = alive ? `
-      <div class="mon-actions">
-        ${moveButton(link.id, player.id, enc.inParty)}
-        ${evolveButton(link.id, player.id, enc)}
-      </div>` : '';
+  const evolve = alive ? evolveButton(link.id, player.id, enc) : '';
+  const controls = evolve ? `<div class="mon-actions">${evolve}</div>` : '';
   return `
     <div class="mon${tint(enc)}${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}${enc.shiny ? ' shiny' : ''}" style="${playerStyle(player.id)}">
       ${head(badge)}
