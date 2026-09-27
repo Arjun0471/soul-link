@@ -163,6 +163,11 @@
         <select name="locationPick" hidden></select>
         <input name="location" required placeholder="Route 29" autocomplete="off">
       </label>
+      <div class="kind-field" id="kind-field" hidden>
+        <span class="picker-label">Encounter type <span class="muted">· each counts as its own encounter</span></span>
+        <div class="kind-options" id="kind-options"></div>
+        <input type="hidden" name="kind">
+      </div>
       <div id="player-fields"></div>
       <label>Status
         <select name="status">
@@ -211,6 +216,10 @@
         </select>
       </label>
       <div id="player-name-fields"></div>
+      <label class="checkbox">
+        <input type="checkbox" name="separateMethods">
+        Surfing, fishing and Rock Smash each count as a separate encounter on a route
+      </label>
       <label class="checkbox">
         <input type="checkbox" name="shinyClause">
         Shiny clause: shinies are free extra catches, not linked to a partner

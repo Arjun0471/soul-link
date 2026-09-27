@@ -630,6 +630,7 @@ function renderMon(link, player, conflicts) {
       <div class="nickname">${esc(monName(enc))}</div>
       ${speciesLine(enc)}
       ${typesHtml(enc)}
+      ${methodTag(enc.method)}
       ${clash ? `<div class="clash-note">${esc(clash)}-type clash</div>` : ''}
       ${controls}
     </div>`;
@@ -637,7 +638,8 @@ function renderMon(link, player, conflicts) {
 
 function renderCard(link, conflicts) {
   const edit = `<button type="button" class="ghost icon-only" data-action="edit" data-id="${esc(link.id)}" title="Edit" aria-label="Edit">${icon('edit')}</button>`;
-  const location = `<span class="loc">${icon('pin')}${esc(link.location || 'Unknown location')}</span>`;
+  const kind = !isShinyCatch(link) && separateMethods() && (link.kind || Object.values(link.encounters || {}).some((e) => e?.method)) ? linkKind(link) : '';
+  const location = `<span class="loc">${icon('pin')}${esc(link.location || 'Unknown location')}${kind ? `<span class="loc-kind">${esc(kindLabel(kind))}</span>` : ''}</span>`;
 
   if (link.status === 'missed') {
     const who = state.players
@@ -998,26 +1000,86 @@ const versionTag = (version) => {
 
 const levelText = ([lo, hi]) => (lo === hi ? `Lv ${lo}` : `Lv ${lo}–${hi}`);
 
-function pickerRowHtml(option, { caught, versionShort }) {
+// Encounter methods in display order, grouped into the dropdown's tabs.
+const METHOD_ORDER = ['Starter', 'Gift', 'Gift egg', 'Fossil', 'Static', 'Grass', 'Cave', 'Tall grass', 'Horde',
+  'DexNav', 'Surfing', 'Old Rod', 'Good Rod', 'Super Rod', 'Rock Smash'];
+const METHOD_FAMILY = {
+  Grass: 'Land', Cave: 'Land', 'Tall grass': 'Land', Horde: 'Land', DexNav: 'Land',
+  Surfing: 'Surfing', 'Old Rod': 'Fishing', 'Good Rod': 'Fishing', 'Super Rod': 'Fishing',
+  'Rock Smash': 'Rock Smash', Starter: 'Special', Gift: 'Special', 'Gift egg': 'Special', Fossil: 'Special', Static: 'Special',
+};
+const FAMILY_ORDER = ['Land', 'Surfing', 'Fishing', 'Rock Smash', 'Special'];
+const METHOD_ICON = {
+  Grass: '🌿', Cave: '🪨', 'Tall grass': '🌾', Horde: '👥', DexNav: '📡', Surfing: '🌊',
+  'Old Rod': '🎣', 'Good Rod': '🎣', 'Super Rod': '🎣', 'Rock Smash': '🔨',
+  Starter: '🎁', Gift: '🎁', 'Gift egg': '🥚', Fossil: '🦴', Static: '⭐',
+};
+const FAMILY_ICON = { Land: '🌿', Surfing: '🌊', Fishing: '🎣', 'Rock Smash': '🔨', Special: '🎁' };
+
+const FAMILY_LABEL = { Land: 'Land', Surfing: 'Surfing', Fishing: 'Fishing', 'Rock Smash': 'Rock Smash', Special: 'Gift & static' };
+const familyOf = (method) => METHOD_FAMILY[method] || (method ? 'Special' : '');
+// Surfing / fishing / Rock Smash count as their own encounter on a route unless turned off.
+const separateMethods = () => state.meta.separateMethods !== false;
+
+// The encounter type a link used up: stored, or worked out from how it was caught.
+function linkKind(link) {
+  if (link.kind) return link.kind;
+  const method = Object.values(link.encounters || {}).map((e) => e?.method).find(Boolean);
+  return familyOf(method) || 'Land';
+}
+
+// Encounter types this location offers in any player's game.
+function familiesAt(location) {
+  const found = new Set();
+  for (const player of state.players) {
+    for (const option of catchableAt(player.version, location) || []) {
+      for (const m of option.here) found.add(familyOf(m));
+    }
+  }
+  return FAMILY_ORDER.filter((f) => found.has(f));
+}
+
+// Encounter types already used at a location (shiny-clause catches don't count).
+function kindsUsedAt(location, excludeLinkId = null) {
+  const key = String(location || '').trim().toLowerCase();
+  return new Set(state.links
+    .filter((l) => l.id !== excludeLinkId && !isShinyCatch(l) && (l.location || '').trim().toLowerCase() === key)
+    .map(linkKind));
+}
+
+const kindLabel = (kind) => `${FAMILY_ICON[kind] || ''} ${FAMILY_LABEL[kind] || kind}`;
+
+const methodTag = (method) => (method
+  ? `<span class="method-tag" title="Caught by ${esc(method)}">${METHOD_ICON[method] || ''} ${esc(method)}</span>` : '');
+
+function pickerRowHtml(option, method, { caught, versionShort }) {
   return `
-    <button type="button" class="picker-row" role="option" data-action="picker-pick" data-species="${esc(option.species)}" data-name="${esc(prettySpecies(option.species).toLowerCase())}">
+    <button type="button" class="picker-row" role="option" data-action="picker-pick" data-species="${esc(option.species)}" data-method="${esc(method)}" data-name="${esc(prettySpecies(option.species).toLowerCase())}">
       <img class="mini" src="${spriteUrl(option.dex)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
       <span class="row-main">
         <span class="row-name">${esc(prettySpecies(option.species))}</span>
         ${typesHtml(option)}
       </span>
       <span class="row-meta">
-        <span class="row-tags">${option.here.map((m) => `<span class="method">${esc(m)}</span>`).join('')}</span>
+        <span class="row-tags">${option.here.map((m) => `<span class="method${m === method ? ' this' : ''}">${METHOD_ICON[m] || ''} ${esc(m)}</span>`).join('')}</span>
         <span class="row-sub">${levelText(option.levels)}${option.exclusive ? ` · <span class="excl">${esc(versionShort)} only</span>` : ''}${caught ? ' · <span class="dupe">caught before</span>' : ''}</span>
       </span>
     </button>`;
 }
 
-// A dropdown of what this player's game has at `location`; falls back to a
-// plain text field when there's no route data. The chosen species always
-// lives in the text input named `field`, so saving code just reads that.
-function speciesPickerHtml(field, player, location, current, { placeholder = 'Leave blank if none', excludeLinkId = null } = {}) {
-  const options = catchableAt(player.version, location);
+// A dropdown of what this player's game has at `location`, grouped by how you
+// find it (a Pokémon shows under every method it appears with), with tabs for
+// Land / Surfing / Fishing / Rock Smash / Special. Falls back to a plain text
+// field when there's no route data. The chosen species lives in the text
+// input named `field` and the method in `<field>-method`.
+function speciesPickerHtml(field, player, location, current, { placeholder = 'Leave blank if none', excludeLinkId = null, method = '', family = '' } = {}) {
+  let options = catchableAt(player.version, location);
+  if (options && family) {
+    options = options
+      .map((o) => ({ ...o, here: o.here.filter((m) => familyOf(m) === family) }))
+      .filter((o) => o.here.length);
+    if (!options.length) options = null;
+  }
   const input = (hidden) => `<input name="${esc(field)}" class="picker-input" list="species-list" value="${esc(prettySpecies(current))}" placeholder="${esc(placeholder)}" autocomplete="off"${hidden ? ' hidden' : ''}>`;
   if (!options) return `<label>Pokémon${input(false)}</label>`;
 
@@ -1026,42 +1088,57 @@ function speciesPickerHtml(field, player, location, current, { placeholder = 'Le
     .filter((l) => l.id !== excludeLinkId)
     .map((l) => l.encounters?.[player.id]?.species)
     .filter(Boolean));
-  const groups = new Map();
+  const groups = new Map(METHOD_ORDER.map((m) => [m, []]));
   for (const option of options) {
-    const key = option.here[0];
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(option);
+    for (const m of option.here) {
+      if (!groups.has(m)) groups.set(m, []);
+      groups.get(m).push(option);
+    }
   }
-  const list = [...groups].map(([method, opts]) => `
-      <div class="picker-group">
-        <div class="picker-group-title">${esc(method)}</div>
-        ${opts.map((o) => pickerRowHtml(o, { caught: caughtBefore.has(o.species), versionShort: info.short })).join('')}
+  const filled = [...groups].filter(([, opts]) => opts.length);
+  const families = FAMILY_ORDER.filter((f) => filled.some(([m]) => (METHOD_FAMILY[m] || 'Special') === f));
+  const tabs = families.length > 1 ? `
+        <div class="picker-tabs" role="tablist">
+          <button type="button" class="picker-tab on" role="tab" data-action="picker-tab" data-family="">All</button>
+          ${families.map((f) => `<button type="button" class="picker-tab" role="tab" data-action="picker-tab" data-family="${esc(f)}">${FAMILY_ICON[f]} ${esc(f)}</button>`).join('')}
+        </div>` : '';
+  const list = filled.map(([m, opts]) => `
+      <div class="picker-group" data-family="${esc(METHOD_FAMILY[m] || 'Special')}">
+        <div class="picker-group-title">${METHOD_ICON[m] || ''} ${esc(m)}</div>
+        ${opts.map((o) => pickerRowHtml(o, m, { caught: caughtBefore.has(o.species), versionShort: info.short })).join('')}
       </div>`).join('');
   const selected = options.some((o) => o.species === current);
   const other = Boolean(current) && !selected;
   return `
     <div class="picker" data-field="${esc(field)}">
-      <span class="picker-label">Pokémon <span class="muted">· ${esc(info.name)}, ${esc(location)}</span></span>
+      <span class="picker-label">Pokémon <span class="muted">· ${esc(info.name)}, ${esc(location)}${family ? ` · ${esc(kindLabel(family))}` : ''}</span></span>
       <button type="button" class="picker-trigger" data-action="picker-toggle" aria-expanded="false"></button>
       <div class="picker-panel" hidden>
+        ${tabs}
         <input type="search" class="picker-filter" placeholder="Filter ${options.length} Pokémon…" autocomplete="off">
         <div class="picker-list" role="listbox">
           ${list}
-          <div class="picker-group">
+          <div class="picker-group picker-extras">
             <button type="button" class="picker-row picker-extra" data-action="picker-pick" data-species="">None yet</button>
             <button type="button" class="picker-row picker-extra" data-action="picker-other">Other species…</button>
           </div>
         </div>
       </div>
       ${input(!other)}
+      <input type="hidden" name="${esc(field)}-method" class="picker-method" value="${esc(selected ? method : '')}">
     </div>`;
 }
+
+// How the chosen Pokémon was found, if it came from the dropdown.
+const pickedMethod = (form, field) => form[`${field}-method`]?.value || '';
 
 // Shows the current choice on the dropdown button.
 function syncPicker(picker) {
   const input = picker.querySelector('.picker-input');
+  const method = picker.querySelector('.picker-method')?.value || '';
   const slug = toSlug(input.value);
-  const row = slug && picker.querySelector(`.picker-row[data-species="${CSS.escape(slug)}"]`);
+  const rows = slug ? [...picker.querySelectorAll(`.picker-row[data-species="${CSS.escape(slug)}"]`)] : [];
+  const row = rows.find((r) => r.dataset.method === method) || rows[0];
   picker.querySelectorAll('.picker-row').forEach((r) => r.setAttribute('aria-selected', String(r === row)));
   const trigger = picker.querySelector('.picker-trigger');
   if (row) {
@@ -1093,16 +1170,18 @@ function togglePicker(picker) {
   if (!panel.hidden) {
     const filter = panel.querySelector('.picker-filter');
     filter.value = '';
-    filterPicker(filter);
+    setPickerTab(picker, '');
     (panel.querySelector('.picker-row[aria-selected="true"]') || filter).scrollIntoView({ block: 'nearest' });
     filter.focus();
   }
 }
 
-function pickSpecies(picker, slug) {
+function pickSpecies(picker, slug, method = '') {
   const input = picker.querySelector('.picker-input');
   input.value = slug ? prettySpecies(slug) : '';
   input.hidden = true;
+  const methodInput = picker.querySelector('.picker-method');
+  if (methodInput) methodInput.value = slug ? method : '';
   syncPicker(picker);
   closePickers();
   picker.querySelector('.picker-trigger').focus();
@@ -1112,6 +1191,8 @@ function pickOther(picker) {
   const input = picker.querySelector('.picker-input');
   if (picker.querySelector(`.picker-row[data-species="${CSS.escape(toSlug(input.value))}"]`)) input.value = '';
   input.hidden = false;
+  const methodInput = picker.querySelector('.picker-method');
+  if (methodInput) methodInput.value = '';
   syncPicker(picker);
   closePickers();
   input.focus();
@@ -1120,12 +1201,21 @@ function pickOther(picker) {
 function filterPicker(filter) {
   const query = filter.value.trim().toLowerCase();
   const panel = filter.closest('.picker-panel');
+  const family = panel.dataset.family || '';
   panel.querySelectorAll('.picker-row[data-name]').forEach((row) => {
     row.hidden = Boolean(query) && !row.dataset.name.includes(query);
   });
   panel.querySelectorAll('.picker-group').forEach((group) => {
-    group.hidden = ![...group.querySelectorAll('.picker-row')].some((r) => !r.hidden);
+    const wrongTab = family && group.dataset.family && group.dataset.family !== family;
+    group.hidden = wrongTab || ![...group.querySelectorAll('.picker-row')].some((r) => !r.hidden);
   });
+}
+
+function setPickerTab(picker, family) {
+  const panel = picker.querySelector('.picker-panel');
+  panel.dataset.family = family;
+  panel.querySelectorAll('.picker-tab').forEach((tab) => tab.classList.toggle('on', tab.dataset.family === family));
+  filterPicker(panel.querySelector('.picker-filter'));
 }
 
 // ---------- location dropdown ----------
@@ -1149,11 +1239,16 @@ function setupLocationField(form, current, { editingLinkId = null, required = tr
     input.required = required;
     return;
   }
-  const used = new Set(state.links
-    .filter((l) => l.id !== editingLinkId && !isShinyCatch(l))
-    .map((l) => (l.location || '').trim().toLowerCase()));
+  const doneLabel = (name) => {
+    const used = kindsUsedAt(name, editingLinkId);
+    if (!used.size) return '';
+    if (!separateMethods()) return '  ✓ done';
+    const offered = familiesAt(name);
+    if (offered.every((f) => used.has(f))) return '  ✓ done';
+    return `  ✓ ${[...used].map((k) => FAMILY_LABEL[k] || k).join(', ')}`;
+  };
   select.innerHTML = `<option value="">${required ? 'Choose a location…' : 'Location (optional)…'}</option>`
-    + locations.map((name) => `<option value="${esc(name)}">${esc(name)}${used.has(name.toLowerCase()) ? '  ✓ done' : ''}</option>`).join('')
+    + locations.map((name) => `<option value="${esc(name)}">${esc(name)}${doneLabel(name)}</option>`).join('')
     + `<option value="${OTHER_LOCATION}">Other location…</option>`;
   const match = locations.find((name) => name.toLowerCase() === current.trim().toLowerCase());
   select.value = match || (current ? OTHER_LOCATION : '');
@@ -1194,6 +1289,7 @@ function renderLinkPlayerFields(link, { keepEntries = false } = {}) {
       nickname: form[`nickname-${p.id}`]?.value ?? '',
       inParty: form[`party-${p.id}`]?.checked,
       shiny: form[`shiny-${p.id}`]?.checked,
+      method: form[`species-${p.id}-method`]?.value || '',
     } : null;
     const alreadyIn = link?.status === 'alive' && enc.species && enc.inParty;
     const room = alreadyIn || partyOf(p.id).length < PARTY_LIMIT;
@@ -1205,7 +1301,7 @@ function renderLinkPlayerFields(link, { keepEntries = false } = {}) {
     return `
       <fieldset style="${playerStyle(p.id)}">
         <legend>${avatar(p, 'sm')}${esc(p.name)}${versionTag(p.version)}</legend>
-        ${speciesPickerHtml(`species-${p.id}`, p, location, species, { excludeLinkId: link?.id })}
+        ${speciesPickerHtml(`species-${p.id}`, p, location, species, { excludeLinkId: link?.id, method: typed ? typed.method : enc.method, family: form.kind.value })}
         <div class="row">
           <label>Nickname
             <input name="nickname-${esc(p.id)}" value="${esc(nickname)}" autocomplete="off">
@@ -1224,6 +1320,28 @@ function renderLinkPlayerFields(link, { keepEntries = false } = {}) {
   initPickers($('#player-fields'));
 }
 
+// Land / Surfing / Fishing / ... chooser under the location. Picks the first
+// type not used yet at that location; the species dropdowns follow it.
+function renderKindField(link, { keep = false } = {}) {
+  const form = $('#link-form');
+  const field = $('#kind-field');
+  const offered = separateMethods() ? familiesAt(form.location.value) : [];
+  if (!offered.length) {
+    field.hidden = true;
+    form.kind.value = '';
+    return;
+  }
+  const used = kindsUsedAt(form.location.value, link?.id);
+  let kind = keep ? form.kind.value : (link ? linkKind(link) : '');
+  if (!offered.includes(kind)) kind = offered.find((f) => !used.has(f)) || offered[0];
+  form.kind.value = kind;
+  field.hidden = false;
+  $('#kind-options').innerHTML = offered.map((f) => `
+    <button type="button" class="kind-option${f === kind ? ' on' : ''}${used.has(f) ? ' used' : ''}" data-action="pick-kind" data-kind="${esc(f)}" aria-pressed="${f === kind}">
+      <span class="kind-icon">${FAMILY_ICON[f]}</span>${esc(FAMILY_LABEL[f])}${used.has(f) ? '<span class="kind-done">✓ used</span>' : ''}
+    </button>`).join('');
+}
+
 function openLinkDialog(link, presetStatus, faintedPlayerId) {
   editingId = link?.id || null;
   const form = $('#link-form');
@@ -1232,6 +1350,7 @@ function openLinkDialog(link, presetStatus, faintedPlayerId) {
   form.querySelector('[data-action="delete-link"]').hidden = !link;
 
   setupLocationField(form, link?.location || '', { editingLinkId: link?.id });
+  renderKindField(link);
   renderLinkPlayerFields(link);
 
   const faintedOptions = state.players.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}'s Pokémon</option>`);
@@ -1277,6 +1396,8 @@ function saveLinkForm() {
     }
     encounters[p.id] = { species, nickname: form[`nickname-${p.id}`].value.trim(), inParty };
     if (form[`shiny-${p.id}`].checked) encounters[p.id].shiny = true;
+    const method = pickedMethod(form, `species-${p.id}`) || (prev?.species === species ? prev.method : '');
+    if (method) encounters[p.id].method = method;
     if (inParty) encounters[p.id].partySince = (wasIn && prev.partySince) || Date.now();
     if (prev?.caughtAs && prev.caughtAs !== species) encounters[p.id].caughtAs = prev.caughtAs;
     // Keep looked-up sprite/types unless the species changed.
@@ -1287,8 +1408,11 @@ function saveLinkForm() {
       Object.assign(encounters[p.id], knownPokemon(species));
     }
   }
+  const pickedKind = Object.values(encounters).map((e) => familyOf(e.method)).find(Boolean);
+  const kind = form.kind.value || (separateMethods() ? pickedKind : '') || '';
   const link = {
     location: form.location.value.trim(),
+    ...(kind ? { kind } : {}),
     status,
     encounters,
     notes: form.notes.value.trim(),
@@ -1332,7 +1456,7 @@ function renderIncompleteShortcuts(editing) {
     <div class="shortcut-list">
       ${pending.flatMap(({ link, missing }) => missing.map((p) => `
         <button type="button" class="shortcut" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(p.id)}" style="${playerStyle(p.id)}">
-          ${avatar(p, 'sm')}<span><strong>${esc(link.location || 'Unknown location')}</strong><span class="muted">Add ${esc(p.name)}'s catch</span></span>
+          ${avatar(p, 'sm')}<span><strong>${esc(link.location || 'Unknown location')}${link.kind && link.kind !== 'Land' ? ` · ${esc(FAMILY_LABEL[link.kind])}` : ''}</strong><span class="muted">Add ${esc(p.name)}'s catch</span></span>
         </button>`)).join('')}
     </div>` : '';
 }
@@ -1347,7 +1471,8 @@ function openCatchDialog(linkId, playerId) {
   catching = { linkId, playerId };
   const form = $('#catch-form');
   form.reset();
-  $('#catch-title').textContent = `${player.name}'s catch at ${link.location || 'this location'}`;
+  const kindNote = separateMethods() && link.kind && link.kind !== 'Land' ? ` (${FAMILY_LABEL[link.kind]})` : '';
+  $('#catch-title').textContent = `${player.name}'s catch at ${link.location || 'this location'}${kindNote}`;
   const partners = state.players.filter((p) => p.id !== playerId && link.encounters?.[p.id]?.species);
   $('#catch-linked').innerHTML = partners.map((p) => {
     const enc = link.encounters[p.id];
@@ -1358,7 +1483,8 @@ function openCatchDialog(linkId, playerId) {
   const partnerInParty = partners.some((p) => link.encounters[p.id].inParty);
   form.inParty.checked = room && (partnerInParty || !partners.length);
   form.inParty.disabled = !room;
-  $('#catch-species').innerHTML = speciesPickerHtml('species', player, link.location, '', { placeholder: 'What did you catch?', excludeLinkId: link.id });
+  const family = separateMethods() && (link.kind || Object.values(link.encounters || {}).some((e) => e?.method)) ? linkKind(link) : '';
+  $('#catch-species').innerHTML = speciesPickerHtml('species', player, link.location, '', { placeholder: 'What did you catch?', excludeLinkId: link.id, family });
   initPickers($('#catch-species'));
   $('#catch-party-label').textContent = room
     ? `In ${player.name}'s party`
@@ -1386,6 +1512,8 @@ function saveCatch() {
   }
   const enc = { species, nickname: form.nickname.value.trim(), inParty, ...knownPokemon(species) };
   if (form.shiny.checked) enc.shiny = true;
+  const method = pickedMethod(form, 'species');
+  if (method) enc.method = method;
   if (inParty) enc.partySince = Date.now();
   // Writes only this player's half so it can't clobber a partner's edit.
   store.write({ [`links/${linkId}/encounters/${playerId}`]: enc });
@@ -1546,7 +1674,8 @@ function renderShinyFields({ species, inParty } = {}) {
   const link = state.links.find((l) => l.id === shinyEditing);
   const keep = species ?? toSlug(form.species?.value);
   const checked = inParty ?? form.inParty.checked;
-  $('#shiny-species').innerHTML = speciesPickerHtml('species', owner, form.location.value, keep, { placeholder: 'Which shiny?', excludeLinkId: shinyEditing });
+  const keepMethod = species !== undefined ? link?.encounters?.[owner.id]?.method : pickedMethod(form, 'species');
+  $('#shiny-species').innerHTML = speciesPickerHtml('species', owner, form.location.value, keep, { placeholder: 'Which shiny?', excludeLinkId: shinyEditing, method: keepMethod });
   initPickers($('#shiny-species'));
   const alreadyIn = link?.status === 'alive' && link.owner === owner.id && link.encounters?.[owner.id]?.inParty;
   const room = alreadyIn || partyOf(owner.id).length < PARTY_LIMIT;
@@ -1580,6 +1709,8 @@ function saveShiny() {
     toast(`${playerName(owner)}'s party is full, so it went to the box.`);
   }
   const enc = { species, nickname: form.nickname.value.trim(), inParty, shiny: true };
+  const method = pickedMethod(form, 'species') || (prev?.species === species ? prev.method : '');
+  if (method) enc.method = method;
   if (inParty) enc.partySince = (wasIn && prev.partySince) || Date.now();
   if (prev?.caughtAs && prev.caughtAs !== species) enc.caughtAs = prev.caughtAs;
   if (prev?.species === species && prev.types) Object.assign(enc, { dexId: prev.dexId, types: prev.types });
@@ -1724,6 +1855,7 @@ function openSettings() {
   form.playerCount.value = String(Math.max(2, state.players.length));
   form.uniqueTypes.checked = state.meta.uniqueTypes !== false;
   form.shinyClause.checked = state.meta.shinyClause !== false;
+  form.separateMethods.checked = state.meta.separateMethods !== false;
   $('#player-name-fields').innerHTML = '';
   renderPlayerNameFields(Number(form.playerCount.value));
   $('#settings-dialog').showModal();
@@ -1742,6 +1874,7 @@ function saveSettings() {
       runName: form.runName.value.trim() || 'Soul Link',
       game: form.game.value.trim(),
       uniqueTypes: form.uniqueTypes.checked,
+      separateMethods: form.separateMethods.checked,
       shinyClause: form.shinyClause.checked,
     },
   };
@@ -1919,7 +2052,18 @@ function handleAction(action, id, button) {
     case 'evolve': return openEvolveDialog(id, button.dataset.player);
     case 'evolve-other': return showOtherSpecies();
     case 'picker-toggle': return togglePicker(button.closest('.picker'));
-    case 'picker-pick': return pickSpecies(button.closest('.picker'), button.dataset.species);
+    case 'picker-pick': return pickSpecies(button.closest('.picker'), button.dataset.species, button.dataset.method);
+    case 'pick-kind': {
+      $('#link-form').kind.value = button.dataset.kind;
+      const editing = state.links.find((l) => l.id === editingId);
+      renderKindField(editing, { keep: true });
+      return renderLinkPlayerFields(editing, { keepEntries: true });
+    }
+    case 'picker-tab': {
+      const picker = button.closest('.picker');
+      setPickerTab(picker, button.dataset.family);
+      return picker.querySelector('.picker-filter').focus();
+    }
     case 'picker-other': return pickOther(button.closest('.picker'));
     case 'share': return copyShareLink();
     case 'jump': return document.getElementById(button.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2011,7 +2155,7 @@ function bindRunEvents() {
     } else if (event.key === 'Enter' && event.target.matches('.picker-filter')) {
       event.preventDefault();
       const first = [...panel.querySelectorAll('.picker-row[data-species]')].find((r) => !r.hidden && r.dataset.species);
-      if (first) pickSpecies(picker, first.dataset.species);
+      if (first) pickSpecies(picker, first.dataset.species, first.dataset.method);
     } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !panel.hidden) {
       event.preventDefault();
       const rows = [...panel.querySelectorAll('.picker-row')].filter((r) => !r.hidden && !r.closest('.picker-group[hidden]'));
@@ -2020,11 +2164,16 @@ function bindRunEvents() {
       next?.focus();
     }
   });
-  $('#link-form').locationPick.addEventListener('change', () => onLocationPicked($('#link-form'),
-    () => renderLinkPlayerFields(state.links.find((l) => l.id === editingId), { keepEntries: true })));
+  $('#link-form').locationPick.addEventListener('change', () => onLocationPicked($('#link-form'), () => {
+    const link = state.links.find((l) => l.id === editingId);
+    renderKindField(link);
+    renderLinkPlayerFields(link, { keepEntries: true });
+  }));
   $('#link-form').location.addEventListener('change', () => {
     if ($('#link-form').locationPick.value === OTHER_LOCATION) {
-      renderLinkPlayerFields(state.links.find((l) => l.id === editingId), { keepEntries: true });
+      const link = state.links.find((l) => l.id === editingId);
+      renderKindField(link);
+      renderLinkPlayerFields(link, { keepEntries: true });
     }
   });
   $('#link-form').status.addEventListener('change', updateDeathFields);

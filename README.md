@@ -14,6 +14,7 @@ A shared tracker for Pokémon **Soul Link** Nuzlocke runs. Each encounter is lin
 - **Badges** in the header: click the badges you've earned to see the next gym.
 - **Undo** after a faint or deleting an encounter, a *who fell* tally and *deadliest foe* in the graveyard, and press **N** to add an encounter.
 - Half-caught pairs are easy to finish: **Add catch** on the encounter card in the Waiting section, or pick it from the *Waiting on a partner's catch* list when adding an encounter. Only that player's half is written, so it never overwrites the partner's edits.
+- **Separate encounters for surfing and fishing.** After picking a location, choose the encounter type (Land, Surfing, Fishing, Rock Smash, Gift & static); only types that location has are offered, used ones are ticked, and the next unused one is preselected. Both players' dropdowns then show just that type. The location list shows what's used ("Route 119 ✓ Land, Fishing") and only says *done* when every type is used. Cards show the type, and the method each Pokémon was found with (e.g. 🎣 Super Rod). Can be switched to one encounter per route in Settings.
 - **Route lookup for Omega Ruby / Alpha Sapphire.** Set what each player is playing (home screen or Settings → *Playing*). The Location field becomes a dropdown of Hoenn locations in story order (visited ones marked ✓ done), and each player gets a dropdown of what *their* version can catch there: sprite, types, how (Grass, Tall grass, Horde, DexNav, Surfing, rods, Rock Smash, gifts, legendaries), level range, version exclusives (*AS only* / *OR only*) and a *caught before* hint. Type to filter; **Other species…** / **Other location…** are always available.
 - Sprites and types looked up automatically from [PokéAPI](https://pokeapi.co). Species autocomplete includes regional forms.
 - Warns when a player's party has two Pokémon with the same primary type (a common Soul Link rule; you can turn this off in Settings)
@@ -55,9 +56,9 @@ The status pill in the top bar shows **● Live** when you're connected. If it s
 Every run lives at `runs/<runId>` in the database:
 
 ```
-runs/<runId>/meta        run name, game, rule toggles, badges
+runs/<runId>/meta        run name, game, rule toggles (uniqueTypes, shinyClause, separateMethods), badges
 runs/<runId>/players/<playerId>   { name, order, version }
-runs/<runId>/links/<linkId>       { location, status: alive|dead|missed, clause?: 'shiny', owner?, encounters: { <playerId>: { species, nickname, inParty, shiny, caughtAs, dexId, types } }, fainted, killer, cause, notes }
+runs/<runId>/links/<linkId>       { location, kind?: Land|Surfing|Fishing|Rock Smash|Special, status: alive|dead|missed, clause?: 'shiny', owner?, encounters: { <playerId>: { species, nickname, method, inParty, shiny, caughtAs, dexId, types } }, fainted, killer, cause, notes }
 ```
 
 Each change writes only the fields it touches. If you both edit different encounters at the same time, both edits are kept.
