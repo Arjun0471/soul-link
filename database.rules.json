@@ -1,0 +1,12 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "runs": {
+      "$runId": {
+        ".read": "$runId.length >= 10",
+        ".write": "$runId.length >= 10"
+      }
+    }
+  }
+}

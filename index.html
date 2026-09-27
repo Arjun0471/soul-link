@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Soul Link Tracker</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Home: create or join a run -->
+  <div id="home-view" hidden>
+    <header class="hero">
+      <h1>Soul Link Tracker</h1>
+      <p class="muted">Track a Pokémon Soul Link run together. Every encounter is chained to your partner's: if one faints, both are gone.</p>
+      <p id="home-mode" class="notice" hidden></p>
+    </header>
+    <main class="home-grid">
+      <form id="create-form" class="panel">
+        <h2>Start a new run</h2>
+        <label>Run name
+          <input name="runName" required value="Soul Link" autocomplete="off">
+        </label>
+        <label>Game
+          <input name="game" placeholder="HeartGold" autocomplete="off">
+        </label>
+        <div class="row">
+          <label>Player 1
+            <input name="p1" required placeholder="Ash" autocomplete="off">
+          </label>
+          <label>Player 2
+            <input name="p2" required placeholder="Gary" autocomplete="off">
+          </label>
+        </div>
+        <button type="submit" class="primary">Create run</button>
+      </form>
+
+      <form id="join-form" class="panel">
+        <h2>Join a run</h2>
+        <p class="muted">Paste the link or run code your partner shared.</p>
+        <label>Link or code
+          <input name="code" required placeholder="https://…/#run=abc123" autocomplete="off">
+        </label>
+        <button type="submit">Join run</button>
+        <div id="recent-runs"></div>
+      </form>
+    </main>
+  </div>
+
+  <!-- Run view -->
+  <div id="run-view" hidden>
+    <header class="topbar">
+      <div class="title-block">
+        <a href="./" class="home-link" title="All runs">← Runs</a>
+        <h1 id="run-name">Soul Link</h1>
+        <p id="run-meta" class="muted"></p>
+      </div>
+      <nav class="toolbar">
+        <span id="sync-status" class="pill">Connecting…</span>
+        <button type="button" class="primary" data-action="add">+ Encounter</button>
+        <button type="button" data-action="share">Copy share link</button>
+        <button type="button" data-action="settings">Settings</button>
+        <button type="button" data-action="export">Export</button>
+        <label class="button" for="import-file">Import</label>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </nav>
+    </header>
+
+    <main>
+      <p id="run-loading" class="muted">Loading run…</p>
+
+      <div id="run-missing" class="panel" hidden>
+        <h2>Run not found</h2>
+        <p class="muted">Nothing is stored under this run code yet. Check the link, or start a fresh run with this code.</p>
+        <button type="button" class="primary" data-action="init-missing">Start a run with this code</button>
+      </div>
+
+      <div id="run-content" hidden>
+        <section class="stats" id="stats" aria-label="Run statistics"></section>
+        <div id="warnings" role="status"></div>
+
+        <section class="group">
+          <h2>Party <span class="count" id="count-party"></span></h2>
+          <div class="cards" id="list-party"></div>
+        </section>
+        <section class="group">
+          <h2>Box <span class="count" id="count-box"></span></h2>
+          <div class="cards" id="list-box"></div>
+        </section>
+        <section class="group">
+          <h2>Graveyard <span class="count" id="count-dead"></span></h2>
+          <div class="cards" id="list-dead"></div>
+        </section>
+        <section class="group">
+          <h2>Failed / skipped <span class="count" id="count-missed"></span></h2>
+          <div class="cards" id="list-missed"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="link-dialog">
+    <form id="link-form" method="dialog">
+      <h2 id="link-dialog-title">Add encounter</h2>
+      <label>Location
+        <input name="location" required placeholder="Route 29" autocomplete="off">
+      </label>
+      <div id="player-fields"></div>
+      <label>Status
+        <select name="status">
+          <option value="party">Party</option>
+          <option value="box">Box</option>
+          <option value="dead">Dead</option>
+          <option value="missed">Failed / skipped</option>
+        </select>
+      </label>
+      <div class="death-fields">
+        <label>Who fainted?
+          <select name="fainted"></select>
+        </label>
+        <label>Cause of death
+          <input name="cause" placeholder="Crit from Whitney's Miltank" autocomplete="off">
+        </label>
+      </div>
+      <label>Notes
+        <textarea name="notes" rows="2"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="danger" data-action="delete-link">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog">
+    <form id="settings-form" method="dialog">
+      <h2>Settings</h2>
+      <label>Run name
+        <input name="runName" required autocomplete="off">
+      </label>
+      <label>Game
+        <input name="game" placeholder="HeartGold" autocomplete="off">
+      </label>
+      <label>Number of players
+        <select name="playerCount">
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+      <div id="player-name-fields"></div>
+      <label class="checkbox">
+        <input type="checkbox" name="uniqueTypes">
+        Warn when a player's party has two Pokémon sharing a primary type
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="danger" data-action="reset">Clear encounters</button>
+        <span class="spacer"></span>
+        <button type="button" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <datalist id="species-list"></datalist>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
