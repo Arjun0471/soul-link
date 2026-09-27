@@ -846,6 +846,8 @@ button.add-catch {
   background: var(--pc);
   border-color: var(--pc);
   max-width: 100%;
+  white-space: normal;
+  text-align: center;
 }
 button.add-catch:hover { background: color-mix(in srgb, var(--pc) 85%, #000); border-color: transparent; }
 

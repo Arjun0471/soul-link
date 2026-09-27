@@ -560,7 +560,7 @@ function renderMon(link, player, conflicts) {
   const head = (extra = '') => `<div class="mon-head">${avatar(player, 'sm')}<span class="owner">${esc(player.name)}</span>${extra}</div>`;
   if (!enc?.species) {
     const add = link.status === 'alive'
-      ? `<button type="button" class="add-catch" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(player.id)}">${icon('plus')}Add ${esc(player.name)}'s catch</button>`
+      ? `<button type="button" class="add-catch" data-action="add-catch" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="Add ${esc(player.name)}'s catch">${icon('plus')}Add catch</button>`
       : '<div class="muted">No encounter</div>';
     return `<div class="mon empty${link.status === 'alive' ? ' waiting' : ''}" style="${playerStyle(player.id)}">${head()}<span class="art placeholder">${icon('ball')}</span>${add}</div>`;
   }
