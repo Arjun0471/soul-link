@@ -1112,3 +1112,175 @@ select[name="locationPick"] + input { margin-top: 8px; }
 .link-button { display: inline; padding: 0; border: 0; background: none; color: var(--box); font: inherit; font-weight: 600; text-decoration: underline; }
 .link-button:hover { background: none; }
 kbd { font: 700 0.75rem/1 ui-monospace, monospace; padding: 2px 6px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--surface-2); }
+
+/* ---------- fainting ---------- */
+
+.faint-dialog {
+  width: min(620px, calc(100vw - 24px));
+  color: #f5f1f1;
+  border: 1px solid rgb(255 80 80 / 0.35);
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgb(190 30 45 / 0.55), transparent 60%),
+    radial-gradient(80% 60% at 50% 120%, rgb(120 10 20 / 0.5), transparent 70%),
+    #120a0d;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 60 60 / 0.15), 0 0 60px rgb(220 38 38 / 0.25);
+}
+.faint-dialog::backdrop { background: rgb(20 0 4 / 0.72); backdrop-filter: blur(4px) grayscale(0.6); }
+.faint-dialog form { gap: 18px; padding: 26px; }
+.faint-head { text-align: center; display: grid; gap: 6px; }
+.faint-kicker { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: #ff8a8a; }
+.faint-dialog h2 { font-size: clamp(1.7rem, 4vw, 2.2rem); font-weight: 800; letter-spacing: -0.02em; }
+.faint-sub { color: rgb(255 255 255 / 0.7); font-size: 0.92rem; }
+
+.faint-pair { display: flex; align-items: center; justify-content: center; gap: 0; }
+.faint-mon {
+  flex: 1 1 0;
+  max-width: 230px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 14px 10px 12px;
+  border-radius: 18px;
+  border: 2px solid rgb(255 255 255 / 0.14);
+  background: rgb(255 255 255 / 0.05);
+  color: #fff;
+  white-space: normal;
+  transition: transform 0.2s, border-color 0.2s, background 0.2s, box-shadow 0.2s, filter 0.3s, opacity 0.3s;
+}
+.faint-mon.tint { background: radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--tc) 30%, transparent), transparent 70%), rgb(255 255 255 / 0.05); }
+.faint-mon:hover { background-color: rgb(255 255 255 / 0.1); border-color: rgb(255 255 255 / 0.3); transform: translateY(-2px); }
+.faint-owner { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 700; color: rgb(255 255 255 / 0.75); }
+.faint-art { position: relative; display: grid; place-items: center; width: 110px; height: 110px; overflow: hidden; }
+.faint-art .art { width: 104px; height: 104px; }
+.faint-skull {
+  position: absolute;
+  inset: auto 0 6px auto;
+  font-size: 1.5rem;
+  opacity: 0;
+  transform: scale(0.4) rotate(-20deg);
+  transition: opacity 0.25s, transform 0.3s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.faint-mon .nickname { font: 700 1.1rem/1.2 var(--display); }
+.faint-state { font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: rgb(255 255 255 / 0.5); }
+
+.faint-mon.fell {
+  border-color: #ff4d4d;
+  background-color: rgb(220 38 38 / 0.18);
+  box-shadow: 0 0 0 4px rgb(255 77 77 / 0.2), 0 0 32px rgb(255 50 50 / 0.35);
+}
+.faint-mon.fell .faint-skull { opacity: 1; transform: none; }
+.faint-mon.fell .faint-state { color: #ff8a8a; }
+.faint-mon.dragged { border-style: dashed; border-color: rgb(255 120 120 / 0.55); filter: saturate(0.4); }
+.faint-mon.dragged .faint-state { color: #ffb4b4; }
+
+.faint-chain {
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin: 0 -12px;
+  border-radius: 50%;
+  background: #1d1116;
+  border: 2px solid rgb(255 255 255 / 0.2);
+  color: rgb(255 255 255 / 0.7);
+  transition: color 0.2s, border-color 0.2s;
+}
+.faint-chain .icon { width: 20px; height: 20px; }
+.faint-pair.broken .faint-chain { color: #ff6b6b; border-color: #ff6b6b; animation: chain-strain 0.9s ease-in-out infinite; }
+@keyframes chain-strain { 50% { transform: rotate(-8deg) scale(1.08); } }
+
+.faint-both {
+  justify-self: center;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px dashed rgb(255 255 255 / 0.3);
+  color: rgb(255 255 255 / 0.8);
+}
+.faint-both:hover, .faint-both.on { background: rgb(220 38 38 / 0.2); border-color: #ff6b6b; color: #fff; }
+
+.faint-cause { color: rgb(255 255 255 / 0.75); }
+.faint-cause input { background: rgb(255 255 255 / 0.08); border-color: rgb(255 255 255 / 0.18); color: #fff; }
+.faint-cause input::placeholder { color: rgb(255 255 255 / 0.4); }
+.faint-cause input:focus { border-color: #ff6b6b; background: rgb(255 255 255 / 0.1); box-shadow: 0 0 0 3px rgb(255 107 107 / 0.25); }
+.cause-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
+.cause-chip { padding: 5px 11px; font-size: 0.78rem; font-weight: 600; background: rgb(255 255 255 / 0.06); border-color: rgb(255 255 255 / 0.15); color: rgb(255 255 255 / 0.8); }
+.cause-chip:hover, .cause-chip.on { background: rgb(220 38 38 / 0.25); border-color: #ff6b6b; color: #fff; }
+.faint-cancel { background: transparent; border-color: rgb(255 255 255 / 0.2); color: rgb(255 255 255 / 0.8); }
+.faint-cancel:hover { background: rgb(255 255 255 / 0.08); border-color: rgb(255 255 255 / 0.35); }
+.faint-confirm {
+  padding: 12px 20px;
+  font-size: 1rem;
+  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  border-color: #ef4444;
+  color: #fff;
+  box-shadow: 0 6px 24px rgb(239 68 68 / 0.45);
+}
+.faint-confirm:hover { background: linear-gradient(180deg, #f05252, #c52020); border-color: #f05252; }
+.faint-confirm:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+
+/* The moment of fainting: shake, the fallen sink out of view like in-game,
+   the partner follows, the chain snaps. */
+.faint-dialog.fainting { animation: faint-shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+.faint-dialog.fainting .faint-mon.fell .art { animation: faint-drop 0.7s 0.35s ease-in forwards; }
+.faint-dialog.fainting .faint-mon.dragged .art { animation: faint-drop 0.7s 0.8s ease-in forwards; }
+.faint-dialog.fainting .faint-mon { border-color: rgb(255 77 77 / 0.6); filter: grayscale(0.7); transition-delay: 0.6s; }
+.faint-dialog.fainting .faint-chain { animation: chain-snap 0.6s 0.25s ease-out forwards; }
+.faint-dialog.fainting .faint-skull { animation: skull-pop 0.5s 0.9s ease-out both; }
+@keyframes faint-shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-8px); }
+  40%, 60% { transform: translateX(8px); }
+}
+@keyframes faint-drop {
+  0% { transform: translateY(0); opacity: 1; }
+  15% { transform: translateY(-8px); }
+  100% { transform: translateY(120px); opacity: 0; }
+}
+@keyframes chain-snap {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.4) rotate(-25deg); color: #fff; border-color: #fff; box-shadow: 0 0 30px #ff4d4d; }
+  100% { transform: scale(0.2) rotate(40deg); opacity: 0; }
+}
+@keyframes skull-pop { 0% { transform: scale(0.4); } 60% { transform: scale(1.6); } 100% { transform: scale(1.2); } }
+
+/* Full-screen flash (like a hit in battle) */
+#flash {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 45%, rgb(255 255 255 / 0.95), rgb(255 60 60 / 0.75) 45%, rgb(120 0 20 / 0.6));
+}
+#flash.go { animation: screen-flash 0.9s ease-out; }
+@keyframes screen-flash {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  18% { opacity: 0.15; }
+  28% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* Freshly fallen card lands in the graveyard with a red glow */
+.card.just-fell { animation: just-fell 1.6s ease-out; }
+@keyframes just-fell {
+  0% { transform: translateY(-14px) scale(0.97); opacity: 0; box-shadow: 0 0 0 0 rgb(239 68 68 / 0); }
+  25% { transform: none; opacity: 1; box-shadow: 0 0 0 3px rgb(239 68 68 / 0.7), 0 0 40px rgb(239 68 68 / 0.5); }
+  100% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0); }
+}
+
+/* Death toasts */
+#toast[data-variant="death"] {
+  background: linear-gradient(135deg, #3b0a12, #16060a);
+  border: 1px solid rgb(255 90 90 / 0.4);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.5), 0 0 30px rgb(220 38 38 / 0.3);
+}
+
+@media (max-width: 480px) {
+  .faint-dialog form { padding: 20px 16px; }
+  .faint-art { width: 84px; height: 84px; }
+  .faint-art .art { width: 80px; height: 80px; }
+  .faint-chain { width: 34px; height: 34px; margin: 0 -10px; }
+}

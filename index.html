@@ -208,9 +208,6 @@
         </select>
       </label>
       <div id="player-name-fields"></div>
-      <label>Level caps <span class="muted">(one per gym, then the League; blank uses the defaults)</span>
-        <input name="levelCaps" autocomplete="off" inputmode="numeric">
-      </label>
       <label class="checkbox">
         <input type="checkbox" name="shinyClause">
         Shiny clause: shinies are free extra catches, not linked to a partner
@@ -329,6 +326,28 @@
     </form>
   </dialog>
 
+  <dialog id="faint-dialog" class="faint-dialog">
+    <form id="faint-form" method="dialog">
+      <div class="faint-head">
+        <p class="faint-kicker" id="faint-kicker">Soul link</p>
+        <h2 id="faint-title">Who fainted?</h2>
+        <p class="faint-sub" id="faint-sub"></p>
+      </div>
+      <div class="faint-pair" id="faint-pair"></div>
+      <button type="button" class="faint-both" id="faint-both" data-action="faint-pick" data-player="all">💀 Both fell at once</button>
+      <label class="faint-cause">What happened?
+        <input name="cause" placeholder="e.g. Crit from Brawly's Makuhita" autocomplete="off">
+      </label>
+      <div class="cause-chips" id="faint-causes"></div>
+      <div class="dialog-actions">
+        <button type="button" class="faint-cancel" data-action="close-dialog">They're fine</button>
+        <span class="spacer"></span>
+        <button type="submit" class="faint-confirm" id="faint-confirm" disabled>💀 Confirm faint</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="flash" aria-hidden="true"></div>
   <datalist id="species-list"></datalist>
   <div id="toast" role="status" aria-live="polite"></div>
 

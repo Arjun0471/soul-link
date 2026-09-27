@@ -81,8 +81,9 @@ const prettySpecies = (slug) =>
     .map((part) => part[0].toUpperCase() + part.slice(1)).join(' ');
 
 let toastTimer;
-function toast(message, action) {
+function toast(message, action, variant = '') {
   const el = $('#toast');
+  el.dataset.variant = variant;
   el.replaceChildren(Object.assign(document.createElement('span'), { textContent: message }));
   if (action) {
     const button = Object.assign(document.createElement('button'), { type: 'button', className: 'toast-action', textContent: action.label });
@@ -104,9 +105,9 @@ function snapshotLink(link) {
   return clean(rest);
 }
 
-function undoToast(message, link) {
+function undoToast(message, link, variant) {
   const saved = snapshotLink(link);
-  toast(message, { label: 'Undo', run: () => store.write({ [`links/${link.id}`]: saved }) });
+  toast(message, { label: 'Undo', run: () => store.write({ [`links/${link.id}`]: saved }) }, variant);
 }
 
 // ---------- storage backends ----------
@@ -645,7 +646,7 @@ function renderCard(link, conflicts) {
     const owner = state.players.find((p) => p.id === link.owner);
     if (!owner) return '';
     return `
-    <article class="card shiny-catch status-${esc(link.status)}" data-id="${esc(link.id)}">
+    <article class="card shiny-catch status-${esc(link.status)}${justFell(link) ? ' just-fell' : ''}" data-id="${esc(link.id)}">
       <header><span class="loc">✨ ${esc(link.location || 'Shiny clause')}</span><span class="clause-tag">Shiny clause · not linked</span>${edit}</header>
       <div class="pair solo">${renderMon(link, owner, conflicts)}</div>
       ${link.status === 'dead' ? `<p class="epitaph">${link.cause ? esc(link.cause) : 'Fell in battle.'}</p>` : ''}
@@ -663,7 +664,7 @@ function renderCard(link, conflicts) {
   const cause = link.status === 'dead'
     ? `<p class="epitaph">${link.cause ? esc(link.cause) : 'Fell in battle.'}</p>` : '';
   return `
-    <article class="card status-${esc(link.status)}" data-id="${esc(link.id)}">
+    <article class="card status-${esc(link.status)}${justFell(link) ? ' just-fell' : ''}" data-id="${esc(link.id)}">
       <header>${location}${edit}</header>
       <div class="pair">${mons}</div>
       ${cause}
@@ -839,36 +840,27 @@ function renderGraveyardTally(dead) {
     : '';
 }
 
-// ---------- badges & level caps ----------
+// ---------- badges ----------
 
-// Gym order and the level of each leader's ace in Omega Ruby / Alpha Sapphire,
-// used as nuzlocke level caps. Editable in Settings (they vary by rule set).
-const ORAS_LEAGUE = [
-  ['Roxanne', 14], ['Brawly', 16], ['Wattson', 21], ['Flannery', 28],
-  ['Norman', 30], ['Winona', 33], ['Tate & Liza', 42], ['Wallace', 46],
-  ['Elite Four & Steven', 59],
-];
+const ORAS_LEAGUE = ['Roxanne', 'Brawly', 'Wattson', 'Flannery', 'Norman', 'Winona', 'Tate & Liza', 'Wallace', 'Elite Four & Steven'];
 
 function leagueSteps() {
   const oras = state.players.some((p) => GAME_VERSIONS[p.version]?.file === 'data/oras.json');
-  const base = oras ? ORAS_LEAGUE : [...Array.from({ length: 8 }, (_, i) => [`Gym ${i + 1}`, null]), ['Pokémon League', null]];
-  const custom = String(state.meta.levelCaps || '').split(/[\s,]+/).filter(Boolean).map(Number);
-  return base.map(([name, cap], i) => ({ name, cap: custom[i] > 0 ? custom[i] : cap }));
+  return oras ? ORAS_LEAGUE : [...Array.from({ length: 8 }, (_, i) => `Gym ${i + 1}`), 'Pokémon League'];
 }
 
 function renderProgress() {
   const steps = leagueSteps();
   const badges = Math.max(0, Math.min(8, Number(state.meta.badges) || 0));
-  const next = steps[badges];
-  const pips = steps.slice(0, 8).map((step, i) => {
+  const pips = steps.slice(0, 8).map((name, i) => {
     const on = i < badges;
     // Clicking the last earned badge un-earns it; any other sets the count.
     const target = i + 1 === badges ? i : i + 1;
-    return `<button type="button" class="badge-pip${on ? ' on' : ''}" data-action="set-badges" data-count="${target}" title="${esc(step.name)}${step.cap ? ` · Lv ${step.cap}` : ''}" aria-label="${on ? 'Earned' : 'Not earned'}: ${esc(step.name)}"><span>${i + 1}</span></button>`;
+    return `<button type="button" class="badge-pip${on ? ' on' : ''}" data-action="set-badges" data-count="${target}" title="${esc(name)}" aria-label="${on ? 'Earned' : 'Not earned'}: ${esc(name)}"><span>${i + 1}</span></button>`;
   }).join('');
   $('#run-progress').innerHTML = `
     <div class="badge-row" aria-label="Badges earned">${pips}</div>
-    <p class="next-up">${badges === 8 ? 'Next: ' : `Next gym: `}<strong>${esc(next.name)}</strong>${next.cap ? ` · Level cap <strong>${next.cap}</strong>` : ''}</p>`;
+    <p class="next-up">${badges === 8 ? 'Next' : 'Next gym'}: <strong>${esc(steps[badges])}</strong></p>`;
 }
 
 function renderRecentRuns() {
@@ -1255,9 +1247,13 @@ function saveLinkForm() {
     link.fainted = form.fainted.value;
     link.cause = form.cause.value.trim();
   }
+  if (status === 'dead' && existing?.status !== 'dead') {
+    localFaints.add(id);
+    recentlyFallen.set(id, Date.now());
+  }
   store.write({ [`links/${id}`]: link });
   if (existing && existing.status !== 'dead' && status === 'dead') {
-    undoToast(`${link.location || 'That'} pair is gone. Rest in peace.`, existing);
+    undoToast(`${link.location || 'That'} pair is gone. Rest in peace.`, existing, 'death');
   } else if (bumped.length && status === 'alive') {
     toast(`${bumped.join(' and ')}'s party is full, so that Pokémon went to the box.`);
   }
@@ -1341,6 +1337,119 @@ function saveCatch() {
   store.write({ [`links/${linkId}/encounters/${playerId}`]: enc });
   catching = null;
   return true;
+}
+
+// ---------- fainting ----------
+
+const FAINT_CAUSES = ['Critical hit', 'Super effective', 'Poisoned', 'Burned', 'Self-Destruct', 'Explosion',
+  'Hurt itself in confusion', 'Wild Pokémon', 'Trainer battle', 'Gym Leader', 'Rival', 'Team Aqua / Magma'];
+let fainting = null;
+const localFaints = new Set();
+const recentlyFallen = new Map();
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const justFell = (link) => Date.now() - (recentlyFallen.get(link.id) || 0) < 8000;
+
+function flashScreen() {
+  const flash = $('#flash');
+  flash.classList.remove('go');
+  void flash.offsetWidth; // restart the animation
+  flash.classList.add('go');
+}
+
+// A dedicated, dramatic dialog: tap the Pokémon that fell, its partner is
+// dragged down with it, pick a cause, confirm.
+function openFaintDialog(linkId, playerId) {
+  const link = state.links.find((l) => l.id === linkId);
+  if (!link || link.status !== 'alive') return;
+  const solo = isShinyCatch(link);
+  const members = solo
+    ? state.players.filter((p) => p.id === link.owner)
+    : state.players.filter((p) => link.encounters?.[p.id]?.species);
+  if (!members.length) return;
+  fainting = { linkId, solo, who: solo ? link.owner : (playerId || (members.length === 1 ? members[0].id : null)), busy: false };
+  const dialog = $('#faint-dialog');
+  dialog.classList.remove('fainting');
+  $('#faint-form').reset();
+  const where = link.location || 'Somewhere in the wild';
+  const onlyMon = link.encounters[members[0].id];
+  $('#faint-kicker').textContent = solo ? '✨ Shiny clause · not linked' : 'Soul link';
+  $('#faint-title').textContent = solo ? `${monName(onlyMon)} fainted?` : 'Who fainted?';
+  $('#faint-sub').textContent = solo
+    ? `${where}. It isn't soul-linked, so only it is lost.`
+    : `${where}. Tap the Pokémon that fell. Its soul-linked partner falls with it.`;
+  $('#faint-pair').innerHTML = members.map((p) => faintMonHtml(link, p))
+    .join(`<span class="faint-chain" aria-hidden="true">${icon('link')}</span>`);
+  $('#faint-pair').classList.toggle('solo', members.length === 1);
+  $('#faint-both').hidden = members.length < 2;
+  $('#faint-causes').innerHTML = FAINT_CAUSES
+    .map((c) => `<button type="button" class="cause-chip" data-action="faint-cause" data-cause="${esc(c)}">${esc(c)}</button>`).join('');
+  updateFaintSelection();
+  dialog.showModal();
+  (fainting.who ? $('#faint-form').cause : $('#faint-pair .faint-mon')).focus();
+}
+
+function faintMonHtml(link, player) {
+  const enc = link.encounters[player.id];
+  return `
+    <button type="button" class="faint-mon${tint(enc)}" data-action="faint-pick" data-player="${esc(player.id)}" style="${playerStyle(player.id)}">
+      <span class="faint-owner">${avatar(player, 'sm')}${esc(player.name)}</span>
+      <span class="faint-art">${artHtml(enc)}<span class="faint-skull" aria-hidden="true">💀</span></span>
+      <span class="nickname">${esc(monName(enc))}</span>
+      <span class="faint-state"></span>
+    </button>`;
+}
+
+function updateFaintSelection() {
+  const { who } = fainting;
+  document.querySelectorAll('#faint-pair .faint-mon').forEach((el) => {
+    const fell = who === 'all' || who === el.dataset.player;
+    const dragged = Boolean(who) && !fell;
+    el.classList.toggle('fell', fell);
+    el.classList.toggle('dragged', dragged);
+    el.setAttribute('aria-pressed', String(fell));
+    el.querySelector('.faint-state').textContent = fell ? 'Fainted' : dragged ? 'Falls with it' : 'Tap if this one fell';
+  });
+  $('#faint-both').classList.toggle('on', who === 'all');
+  $('#faint-pair').classList.toggle('broken', Boolean(who));
+  $('#faint-confirm').disabled = !who;
+}
+
+async function confirmFaint() {
+  if (!fainting?.who || fainting.busy) return;
+  const link = state.links.find((l) => l.id === fainting.linkId);
+  if (!link) return;
+  fainting.busy = true;
+  const { who, solo } = fainting;
+  const cause = $('#faint-form').cause.value.trim();
+  const dialog = $('#faint-dialog');
+  dialog.classList.add('fainting');
+  flashScreen();
+  await wait(reducedMotion() ? 0 : 1500);
+  localFaints.add(link.id);
+  recentlyFallen.set(link.id, Date.now());
+  store.write({
+    [`links/${link.id}/status`]: 'dead',
+    [`links/${link.id}/fainted`]: who,
+    [`links/${link.id}/cause`]: cause || null,
+    [`links/${link.id}/diedAt`]: Date.now(),
+  });
+  dialog.close();
+  const name = monName(link.encounters?.[solo ? link.owner : who] || Object.values(link.encounters || {})[0]);
+  const pair = link.location ? `The ${link.location} pair` : 'The pair';
+  undoToast(solo ? `💀 ${name} fainted. Rest in peace.` : `💀 ${pair} has fallen. Rest in peace.`, link, 'death');
+  fainting = null;
+}
+
+// When a partner's death arrives from the other machine, make sure it's noticed.
+function announceRemoteDeaths(links) {
+  if (!links.length) return;
+  flashScreen();
+  const text = links.map((link) => {
+    const names = Object.entries(link.encounters || {}).map(([, enc]) => monName(enc)).join(' & ');
+    return `${link.location || 'A pair'}: ${names}${link.cause ? ` (${link.cause})` : ''}`;
+  }).join(' · ');
+  toast(`💀 Fallen: ${text}`, null, 'death');
 }
 
 // ---------- shiny clause ----------
@@ -1430,9 +1539,13 @@ function saveShiny() {
     link.fainted = owner;
     link.cause = form.cause.value.trim();
   }
+  if (status === 'dead' && existing?.status !== 'dead') {
+    localFaints.add(id);
+    recentlyFallen.set(id, Date.now());
+  }
   store.write({ [`links/${id}`]: link });
   if (existing && existing.status !== 'dead' && status === 'dead') {
-    undoToast(`${monName(enc)} fainted.`, existing);
+    undoToast(`${monName(enc)} fainted.`, existing, 'death');
   } else if (!existing) {
     toast(`✨ ${monName(enc)} joins ${playerName(owner)}'s team under the shiny clause!`);
   }
@@ -1549,8 +1662,6 @@ function openSettings() {
   form.playerCount.value = String(Math.max(2, state.players.length));
   form.uniqueTypes.checked = state.meta.uniqueTypes !== false;
   form.shinyClause.checked = state.meta.shinyClause !== false;
-  form.levelCaps.value = state.meta.levelCaps || '';
-  form.levelCaps.placeholder = leagueSteps().map((s) => s.cap ?? '?').join(', ');
   $('#player-name-fields').innerHTML = '';
   renderPlayerNameFields(Number(form.playerCount.value));
   $('#settings-dialog').showModal();
@@ -1570,7 +1681,6 @@ function saveSettings() {
       game: form.game.value.trim(),
       uniqueTypes: form.uniqueTypes.checked,
       shinyClause: form.shinyClause.checked,
-      levelCaps: form.levelCaps.value.trim(),
     },
   };
   for (let i = 0; i < count; i++) {
@@ -1714,7 +1824,18 @@ function handleAction(action, id, button) {
   switch (action) {
     case 'add': return openLinkDialog(null);
     case 'edit': return isShinyCatch(link) ? openShinyDialog(link) : openLinkDialog(link);
-    case 'kill': return isShinyCatch(link) ? openShinyDialog(link, 'dead') : openLinkDialog(link, 'dead', button.dataset.player);
+    case 'kill': return openFaintDialog(id, button.dataset.player);
+    case 'faint-pick':
+      if (!fainting || fainting.busy) return;
+      if (!fainting.solo) fainting.who = button.dataset.player;
+      return updateFaintSelection();
+    case 'faint-cause': {
+      const input = $('#faint-form').cause;
+      input.value = button.dataset.cause;
+      document.querySelectorAll('.cause-chip').forEach((chip) => chip.classList.toggle('on', chip === button));
+      input.focus();
+      return;
+    }
     case 'open-shiny': return openShinyDialog(null);
     case 'delete-shiny': {
       const target = state.links.find((l) => l.id === shinyEditing);
@@ -1777,6 +1898,12 @@ function bindRunEvents() {
     saveLinkForm();
     $('#link-dialog').close();
   });
+  $('#faint-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    confirmFaint();
+  });
+  // No escaping mid-animation.
+  $('#faint-dialog').addEventListener('cancel', (event) => { if (fainting?.busy) event.preventDefault(); });
   $('#shiny-form').addEventListener('submit', (event) => {
     event.preventDefault();
     if (saveShiny()) $('#shiny-dialog').close();
@@ -1904,9 +2031,17 @@ async function main() {
   store = await createStore(runId);
   renderSync(false);
   store.onConnection(renderSync);
+  let previous = null;
   store.subscribe((raw) => {
-    state = normalize(raw);
+    const next = normalize(raw);
+    const fallen = previous
+      ? next.links.filter((l) => l.status === 'dead' && previous.get(l.id) === 'alive' && !localFaints.has(l.id))
+      : [];
+    for (const link of fallen) recentlyFallen.set(link.id, Date.now());
+    previous = new Map(next.links.map((l) => [l.id, l.status]));
+    state = next;
     renderRun();
+    announceRemoteDeaths(fallen);
   });
 }
 
