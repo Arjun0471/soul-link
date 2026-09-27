@@ -35,15 +35,23 @@
         <label>Run name
           <input name="runName" required value="Soul Link" autocomplete="off">
         </label>
-        <label>Game
-          <input name="game" placeholder="HeartGold" autocomplete="off">
+        <label>Game label <span class="muted">(optional)</span>
+          <input name="game" placeholder="Leave blank to use the games below" autocomplete="off">
         </label>
         <div class="row">
           <label>Player 1
             <input name="p1" required placeholder="Red" autocomplete="off">
           </label>
+          <label>Playing
+            <select name="v1" class="version-select"></select>
+          </label>
+        </div>
+        <div class="row">
           <label>Player 2
             <input name="p2" required placeholder="Blue" autocomplete="off">
+          </label>
+          <label>Playing
+            <select name="v2" class="version-select"></select>
           </label>
         </div>
         <button type="submit" class="primary big">Create run</button>
@@ -137,6 +145,7 @@
       <h2 id="link-dialog-title">Add encounter</h2>
       <div id="incomplete-pairs" class="incomplete-pairs" hidden></div>
       <label>Location
+        <select name="locationPick" hidden></select>
         <input name="location" required placeholder="Route 29" autocomplete="off">
       </label>
       <div id="player-fields"></div>
@@ -201,14 +210,10 @@
     <form id="catch-form" method="dialog">
       <h2 id="catch-title">Add catch</h2>
       <div id="catch-linked"></div>
-      <div class="row">
-        <label>Pokémon
-          <input name="species" list="species-list" required autocomplete="off" placeholder="What did you catch?">
-        </label>
-        <label>Nickname
-          <input name="nickname" autocomplete="off">
-        </label>
-      </div>
+      <div id="catch-species"></div>
+      <label>Nickname
+        <input name="nickname" autocomplete="off">
+      </label>
       <label class="checkbox">
         <input type="checkbox" name="inParty">
         <span id="catch-party-label">In party</span>

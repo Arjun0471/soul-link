@@ -173,10 +173,10 @@ function createLocalStore(runId) {
 
 // ---------- run data ----------
 
-function initialRun({ runName, game, playerNames }) {
+function initialRun({ runName, game, playerNames, versions = [] }) {
   const players = {};
   playerNames.forEach((name, order) => {
-    players[newId(8)] = { name, order };
+    players[newId(8)] = clean({ name, order, version: versions[order] || undefined });
   });
   return {
     meta: { runName, game, uniqueTypes: true, createdAt: Date.now() },
@@ -188,7 +188,7 @@ function normalize(raw) {
   const data = raw || {};
   const meta = { runName: 'Soul Link', game: '', uniqueTypes: true, ...data.meta };
   const players = Object.entries(data.players || {})
-    .map(([id, p]) => ({ id, name: p.name || 'Player', order: p.order ?? 0 }))
+    .map(([id, p]) => ({ id, name: p.name || 'Player', order: p.order ?? 0, version: p.version || '' }))
     .sort((a, b) => a.order - b.order);
   const links = Object.entries(data.links || {})
     .map(([id, link]) => normalizeLink(id, link))
@@ -680,7 +680,7 @@ function renderTeams(conflicts) {
         <header class="team-head">
           ${avatar(player)}
           <div>
-            <h3>${esc(player.name)}</h3>
+            <h3>${esc(player.name)}${versionTag(player.version)}</h3>
             <div class="pips" title="${party.length} of ${PARTY_LIMIT} party slots used">${pips}<span class="party-count">${party.length}/${PARTY_LIMIT}</span></div>
           </div>
         </header>
@@ -707,7 +707,10 @@ function renderRun() {
   const { meta, players } = state;
   document.title = `${meta.runName} · Soul Link Tracker`;
   $('#run-name').textContent = meta.runName;
-  $('#run-game').textContent = meta.game ? `Pokémon ${meta.game.replace(/^pok[eé]mon\s+/i, '')}` : 'Soul Link run';
+  const versionNames = [...new Set(players.map((p) => GAME_VERSIONS[p.version]?.name).filter(Boolean))];
+  $('#run-game').textContent = meta.game
+    ? `Pokémon ${meta.game.replace(/^pok[eé]mon\s+/i, '')}`
+    : versionNames.length ? `Pokémon ${versionNames.join(' & ')}` : 'Soul Link run';
   $('#run-players').innerHTML = players
     .map((p) => `<span class="player-chip">${avatar(p, 'sm')}${esc(p.name)}</span>`)
     .join(`<span class="chain-sm">${icon('link')}</span>`);
@@ -743,6 +746,7 @@ function renderRun() {
 
   resolveMissingPokemonData();
   prefetchEvolutions();
+  preloadGameData();
 }
 
 function renderRecentRuns() {
@@ -752,9 +756,297 @@ function renderRecentRuns() {
     : '';
 }
 
+// ---------- route data (what can be caught where) ----------
+
+// Encounter tables per game version, built by tools/build_oras_encounters.py.
+// Another game can be added by generating its file and listing its versions here.
+const GAME_VERSIONS = {
+  'omega-ruby': { name: 'Omega Ruby', short: 'OR', file: 'data/oras.json' },
+  'alpha-sapphire': { name: 'Alpha Sapphire', short: 'AS', file: 'data/oras.json' },
+};
+const gameFiles = new Map();
+const gameData = new Map();
+
+function loadGameFile(file) {
+  if (!gameFiles.has(file)) {
+    gameFiles.set(file, fetch(file)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return null;
+        data.byName = new Map(data.locations.map((l) => [l.name.toLowerCase(), l]));
+        data.bySpecies = new Map();
+        for (const loc of data.locations) for (const p of loc.pokemon) data.bySpecies.set(p.species, p);
+        gameData.set(file, data);
+        return data;
+      })
+      .catch(() => null));
+  }
+  return gameFiles.get(file);
+}
+
+const dataFor = (version) => gameData.get(GAME_VERSIONS[version]?.file);
+
+function preloadGameData() {
+  for (const player of state.players) {
+    const file = GAME_VERSIONS[player.version]?.file;
+    if (file && !gameFiles.has(file)) loadGameFile(file).then((data) => data && scheduleRender());
+  }
+}
+
+// Every location in the players' games, in story order.
+function knownLocations() {
+  const seen = new Map();
+  for (const player of state.players) {
+    for (const loc of dataFor(player.version)?.locations || []) {
+      if (!seen.has(loc.name.toLowerCase())) seen.set(loc.name.toLowerCase(), loc.name);
+    }
+  }
+  return [...seen.values()];
+}
+
+// What `version` can catch at `location`, or null when there's no data for it.
+function catchableAt(version, location) {
+  const data = dataFor(version);
+  const loc = data?.byName.get(String(location || '').trim().toLowerCase());
+  if (!loc) return null;
+  const others = Object.keys(data.versions).filter((v) => v !== version);
+  return loc.pokemon
+    .filter((p) => p.methods[version])
+    .map((p) => ({ ...p, here: p.methods[version], exclusive: others.length > 0 && others.every((o) => !p.methods[o]) }));
+}
+
+// Sprite/type info straight from the route data, so no lookup is needed.
+function knownPokemon(slug) {
+  for (const data of gameData.values()) {
+    const p = data.bySpecies.get(slug);
+    if (p) return { dexId: p.dex, types: p.types };
+  }
+  return null;
+}
+
+const versionTag = (version) => {
+  const info = GAME_VERSIONS[version];
+  return info ? `<span class="version-tag v-${esc(version)}" title="${esc(info.name)}">${esc(info.short)}</span>` : '';
+};
+
+// ---------- species dropdown ----------
+
+const levelText = ([lo, hi]) => (lo === hi ? `Lv ${lo}` : `Lv ${lo}–${hi}`);
+
+function pickerRowHtml(option, { caught, versionShort }) {
+  return `
+    <button type="button" class="picker-row" role="option" data-action="picker-pick" data-species="${esc(option.species)}" data-name="${esc(prettySpecies(option.species).toLowerCase())}">
+      <img class="mini" src="${spriteUrl(option.dex)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <span class="row-main">
+        <span class="row-name">${esc(prettySpecies(option.species))}</span>
+        ${typesHtml(option)}
+      </span>
+      <span class="row-meta">
+        <span class="row-tags">${option.here.map((m) => `<span class="method">${esc(m)}</span>`).join('')}</span>
+        <span class="row-sub">${levelText(option.levels)}${option.exclusive ? ` · <span class="excl">${esc(versionShort)} only</span>` : ''}${caught ? ' · <span class="dupe">caught before</span>' : ''}</span>
+      </span>
+    </button>`;
+}
+
+// A dropdown of what this player's game has at `location`; falls back to a
+// plain text field when there's no route data. The chosen species always
+// lives in the text input named `field`, so saving code just reads that.
+function speciesPickerHtml(field, player, location, current, { placeholder = 'Leave blank if none', excludeLinkId = null } = {}) {
+  const options = catchableAt(player.version, location);
+  const input = (hidden) => `<input name="${esc(field)}" class="picker-input" list="species-list" value="${esc(prettySpecies(current))}" placeholder="${esc(placeholder)}" autocomplete="off"${hidden ? ' hidden' : ''}>`;
+  if (!options) return `<label>Pokémon${input(false)}</label>`;
+
+  const info = GAME_VERSIONS[player.version];
+  const caughtBefore = new Set(state.links
+    .filter((l) => l.id !== excludeLinkId)
+    .map((l) => l.encounters?.[player.id]?.species)
+    .filter(Boolean));
+  const groups = new Map();
+  for (const option of options) {
+    const key = option.here[0];
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(option);
+  }
+  const list = [...groups].map(([method, opts]) => `
+      <div class="picker-group">
+        <div class="picker-group-title">${esc(method)}</div>
+        ${opts.map((o) => pickerRowHtml(o, { caught: caughtBefore.has(o.species), versionShort: info.short })).join('')}
+      </div>`).join('');
+  const selected = options.some((o) => o.species === current);
+  const other = Boolean(current) && !selected;
+  return `
+    <div class="picker" data-field="${esc(field)}">
+      <span class="picker-label">Pokémon <span class="muted">· ${esc(info.name)}, ${esc(location)}</span></span>
+      <button type="button" class="picker-trigger" data-action="picker-toggle" aria-expanded="false"></button>
+      <div class="picker-panel" hidden>
+        <input type="search" class="picker-filter" placeholder="Filter ${options.length} Pokémon…" autocomplete="off">
+        <div class="picker-list" role="listbox">
+          ${list}
+          <div class="picker-group">
+            <button type="button" class="picker-row picker-extra" data-action="picker-pick" data-species="">None yet</button>
+            <button type="button" class="picker-row picker-extra" data-action="picker-other">Other species…</button>
+          </div>
+        </div>
+      </div>
+      ${input(!other)}
+    </div>`;
+}
+
+// Shows the current choice on the dropdown button.
+function syncPicker(picker) {
+  const input = picker.querySelector('.picker-input');
+  const slug = toSlug(input.value);
+  const row = slug && picker.querySelector(`.picker-row[data-species="${CSS.escape(slug)}"]`);
+  picker.querySelectorAll('.picker-row').forEach((r) => r.setAttribute('aria-selected', String(r === row)));
+  const trigger = picker.querySelector('.picker-trigger');
+  if (row) {
+    trigger.innerHTML = `${row.innerHTML}<span class="chevron">▾</span>`;
+  } else if (!input.hidden) {
+    trigger.innerHTML = '<span class="picker-placeholder">Other species (type it below)</span><span class="chevron">▾</span>';
+  } else {
+    trigger.innerHTML = '<span class="picker-placeholder">Choose a Pokémon…</span><span class="chevron">▾</span>';
+  }
+}
+
+function initPickers(root) {
+  root.querySelectorAll('.picker').forEach(syncPicker);
+}
+
+function closePickers(except) {
+  document.querySelectorAll('.picker-panel:not([hidden])').forEach((panel) => {
+    if (panel.closest('.picker') === except) return;
+    panel.hidden = true;
+    panel.closest('.picker').querySelector('.picker-trigger').setAttribute('aria-expanded', 'false');
+  });
+}
+
+function togglePicker(picker) {
+  const panel = picker.querySelector('.picker-panel');
+  closePickers(picker);
+  panel.hidden = !panel.hidden;
+  picker.querySelector('.picker-trigger').setAttribute('aria-expanded', String(!panel.hidden));
+  if (!panel.hidden) {
+    const filter = panel.querySelector('.picker-filter');
+    filter.value = '';
+    filterPicker(filter);
+    (panel.querySelector('.picker-row[aria-selected="true"]') || filter).scrollIntoView({ block: 'nearest' });
+    filter.focus();
+  }
+}
+
+function pickSpecies(picker, slug) {
+  const input = picker.querySelector('.picker-input');
+  input.value = slug ? prettySpecies(slug) : '';
+  input.hidden = true;
+  syncPicker(picker);
+  closePickers();
+  picker.querySelector('.picker-trigger').focus();
+}
+
+function pickOther(picker) {
+  const input = picker.querySelector('.picker-input');
+  if (picker.querySelector(`.picker-row[data-species="${CSS.escape(toSlug(input.value))}"]`)) input.value = '';
+  input.hidden = false;
+  syncPicker(picker);
+  closePickers();
+  input.focus();
+}
+
+function filterPicker(filter) {
+  const query = filter.value.trim().toLowerCase();
+  const panel = filter.closest('.picker-panel');
+  panel.querySelectorAll('.picker-row[data-name]').forEach((row) => {
+    row.hidden = Boolean(query) && !row.dataset.name.includes(query);
+  });
+  panel.querySelectorAll('.picker-group').forEach((group) => {
+    group.hidden = ![...group.querySelectorAll('.picker-row')].some((r) => !r.hidden);
+  });
+}
+
+// ---------- location dropdown ----------
+
+const OTHER_LOCATION = '__other';
+
+function setupLocationField(current, editingLinkId) {
+  const form = $('#link-form');
+  const select = form.locationPick;
+  const input = form.location;
+  const locations = knownLocations();
+  input.value = current;
+  if (!locations.length) {
+    select.hidden = true;
+    select.required = false;
+    input.hidden = false;
+    input.required = true;
+    return;
+  }
+  const used = new Set(state.links.filter((l) => l.id !== editingLinkId).map((l) => (l.location || '').trim().toLowerCase()));
+  select.innerHTML = '<option value="">Choose a location…</option>'
+    + locations.map((name) => `<option value="${esc(name)}">${esc(name)}${used.has(name.toLowerCase()) ? '  ✓ done' : ''}</option>`).join('')
+    + `<option value="${OTHER_LOCATION}">Other location…</option>`;
+  const match = locations.find((name) => name.toLowerCase() === current.trim().toLowerCase());
+  select.value = match || (current ? OTHER_LOCATION : '');
+  if (match) input.value = match;
+  select.hidden = false;
+  select.required = true;
+  const typing = select.value === OTHER_LOCATION;
+  input.hidden = !typing;
+  input.required = typing;
+}
+
+function onLocationPicked() {
+  const form = $('#link-form');
+  const typing = form.locationPick.value === OTHER_LOCATION;
+  form.location.hidden = !typing;
+  form.location.required = typing;
+  if (typing) {
+    form.location.value = '';
+    form.location.focus();
+  } else {
+    form.location.value = form.locationPick.value;
+  }
+  renderLinkPlayerFields(state.links.find((l) => l.id === editingId), { keepEntries: true });
+}
+
 // ---------- encounter dialog ----------
 
 let editingId = null;
+
+// Player sections of the encounter dialog. Re-rendered when the location
+// changes so each player's dropdown shows what their game has there.
+function renderLinkPlayerFields(link, { keepEntries = false } = {}) {
+  const form = $('#link-form');
+  const location = form.location.value;
+  $('#player-fields').innerHTML = state.players.map((p) => {
+    const enc = link?.encounters?.[p.id] || {};
+    const typed = keepEntries ? {
+      species: toSlug(form[`species-${p.id}`]?.value),
+      nickname: form[`nickname-${p.id}`]?.value ?? '',
+      inParty: form[`party-${p.id}`]?.checked,
+    } : null;
+    const alreadyIn = link?.status === 'alive' && enc.species && enc.inParty;
+    const room = alreadyIn || partyOf(p.id).length < PARTY_LIMIT;
+    // New catches go to the party while that player has room.
+    const inParty = room && (typed ? typed.inParty : (link ? enc.inParty : true));
+    const species = typed ? typed.species : enc.species;
+    const nickname = typed ? typed.nickname : enc.nickname;
+    return `
+      <fieldset style="${playerStyle(p.id)}">
+        <legend>${avatar(p, 'sm')}${esc(p.name)}${versionTag(p.version)}</legend>
+        ${speciesPickerHtml(`species-${p.id}`, p, location, species, { excludeLinkId: link?.id })}
+        <div class="row">
+          <label>Nickname
+            <input name="nickname-${esc(p.id)}" value="${esc(nickname)}" autocomplete="off">
+          </label>
+          <label class="checkbox party-check">
+            <input type="checkbox" name="party-${esc(p.id)}"${inParty ? ' checked' : ''}${room ? '' : ' disabled'}>
+            ${room ? `In ${esc(p.name)}'s party` : `${esc(p.name)}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}), goes to the box`}
+          </label>
+        </div>
+      </fieldset>`;
+  }).join('');
+  initPickers($('#player-fields'));
+}
 
 function openLinkDialog(link, presetStatus, faintedPlayerId) {
   editingId = link?.id || null;
@@ -763,35 +1055,13 @@ function openLinkDialog(link, presetStatus, faintedPlayerId) {
   $('#link-dialog-title').textContent = link ? 'Edit encounter' : 'Add encounter';
   form.querySelector('[data-action="delete-link"]').hidden = !link;
 
-  $('#player-fields').innerHTML = state.players.map((p) => {
-    const enc = link?.encounters?.[p.id] || {};
-    const alreadyIn = link?.status === 'alive' && enc.species && enc.inParty;
-    const room = alreadyIn || partyOf(p.id).length < PARTY_LIMIT;
-    // New catches go to the party while that player has room.
-    const inParty = room && (link ? enc.inParty : true);
-    return `
-      <fieldset style="${playerStyle(p.id)}">
-        <legend>${avatar(p, 'sm')}${esc(p.name)}</legend>
-        <div class="row">
-          <label>Pokémon
-            <input name="species-${esc(p.id)}" list="species-list" value="${esc(prettySpecies(enc.species))}" placeholder="Leave blank if none" autocomplete="off">
-          </label>
-          <label>Nickname
-            <input name="nickname-${esc(p.id)}" value="${esc(enc.nickname)}" autocomplete="off">
-          </label>
-        </div>
-        <label class="checkbox">
-          <input type="checkbox" name="party-${esc(p.id)}"${inParty ? ' checked' : ''}${room ? '' : ' disabled'}>
-          ${room ? `In ${esc(p.name)}'s party` : `${esc(p.name)}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}), goes to the box`}
-        </label>
-      </fieldset>`;
-  }).join('');
+  setupLocationField(link?.location || '', link?.id);
+  renderLinkPlayerFields(link);
 
   const faintedOptions = state.players.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}'s Pokémon</option>`);
   faintedOptions.push('<option value="all">Both / all</option>');
   form.fainted.innerHTML = faintedOptions.join('');
 
-  form.location.value = link?.location || '';
   form.status.value = presetStatus || link?.status || 'alive';
   form.fainted.value = faintedPlayerId || link?.fainted || state.players[0]?.id || 'all';
   form.cause.value = link?.cause || '';
@@ -800,7 +1070,8 @@ function openLinkDialog(link, presetStatus, faintedPlayerId) {
 
   renderIncompleteShortcuts(link);
   $('#link-dialog').showModal();
-  (presetStatus === 'dead' ? form.cause : form.location).focus();
+  if (presetStatus === 'dead') form.cause.focus();
+  else (form.locationPick.hidden ? form.location : form.locationPick).focus();
 }
 
 function updateDeathFields() {
@@ -833,6 +1104,8 @@ function saveLinkForm() {
     if (prev?.species === species && prev.types) {
       encounters[p.id].dexId = prev.dexId;
       encounters[p.id].types = prev.types;
+    } else {
+      Object.assign(encounters[p.id], knownPokemon(species));
     }
   }
   const link = {
@@ -899,17 +1172,23 @@ function openCatchDialog(linkId, playerId) {
   const partnerInParty = partners.some((p) => link.encounters[p.id].inParty);
   form.inParty.checked = room && (partnerInParty || !partners.length);
   form.inParty.disabled = !room;
+  $('#catch-species').innerHTML = speciesPickerHtml('species', player, link.location, '', { placeholder: 'What did you catch?', excludeLinkId: link.id });
+  initPickers($('#catch-species'));
   $('#catch-party-label').textContent = room
     ? `In ${player.name}'s party`
     : `${player.name}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}), goes to the box`;
   $('#catch-dialog').showModal();
-  form.species.focus();
+  ($('#catch-species .picker-trigger') || form.species).focus();
 }
 
 function saveCatch() {
   const form = $('#catch-form');
   const species = toSlug(form.species.value);
-  if (!catching || !species) return false;
+  if (!catching) return false;
+  if (!species) {
+    toast('Pick the Pokémon that was caught first.');
+    return false;
+  }
   const { linkId, playerId } = catching;
   const link = state.links.find((l) => l.id === linkId);
   if (!link) return false;
@@ -919,7 +1198,7 @@ function saveCatch() {
     inParty = false;
     toast(`${playerName(playerId)}'s party is full, so it went to the box.`);
   }
-  const enc = { species, nickname: form.nickname.value.trim(), inParty };
+  const enc = { species, nickname: form.nickname.value.trim(), inParty, ...knownPokemon(species) };
   if (inParty) enc.partySince = Date.now();
   // Writes only this player's half so it can't clobber a partner's edit.
   store.write({ [`links/${linkId}/encounters/${playerId}`]: enc });
@@ -1013,11 +1292,20 @@ function saveEvolution() {
 
 // ---------- settings dialog ----------
 
+const versionOptions = (selected) => '<option value="">Other game (no route data)</option>'
+  + Object.entries(GAME_VERSIONS).map(([id, v]) => `<option value="${id}"${id === selected ? ' selected' : ''}>Pokémon ${esc(v.name)}</option>`).join('');
+
 function renderPlayerNameFields(count) {
-  const current = [...document.querySelectorAll('#player-name-fields input')].map((i) => i.value);
+  const names = [...document.querySelectorAll('#player-name-fields input')].map((i) => i.value);
+  const versions = [...document.querySelectorAll('#player-name-fields select')].map((s) => s.value);
   $('#player-name-fields').innerHTML = Array.from({ length: count }, (_, i) => {
-    const value = current[i] ?? state.players[i]?.name ?? '';
-    return `<label>Player ${i + 1}<input name="player-${i}" required value="${esc(value)}" autocomplete="off"></label>`;
+    const name = names[i] ?? state.players[i]?.name ?? '';
+    const version = versions[i] ?? state.players[i]?.version ?? '';
+    return `
+      <div class="row">
+        <label>Player ${i + 1}<input name="player-${i}" required value="${esc(name)}" autocomplete="off"></label>
+        <label>Playing<select name="version-${i}">${versionOptions(version)}</select></label>
+      </div>`;
   }).join('');
 }
 
@@ -1049,7 +1337,11 @@ function saveSettings() {
   };
   for (let i = 0; i < count; i++) {
     const id = state.players[i]?.id || newId(8);
-    patches[`players/${id}`] = { name: form[`player-${i}`].value.trim() || `Player ${i + 1}`, order: i };
+    patches[`players/${id}`] = clean({
+      name: form[`player-${i}`].value.trim() || `Player ${i + 1}`,
+      order: i,
+      version: form[`version-${i}`].value || undefined,
+    });
   }
   for (const player of removed) {
     patches[`players/${player.id}`] = null;
@@ -1194,6 +1486,9 @@ function handleAction(action, id, button) {
       return $('#swap-dialog').close();
     case 'evolve': return openEvolveDialog(id, button.dataset.player);
     case 'evolve-other': return showOtherSpecies();
+    case 'picker-toggle': return togglePicker(button.closest('.picker'));
+    case 'picker-pick': return pickSpecies(button.closest('.picker'), button.dataset.species);
+    case 'picker-other': return pickOther(button.closest('.picker'));
     case 'share': return copyShareLink();
     case 'jump': return document.getElementById(button.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     case 'settings': return openSettings();
@@ -1222,6 +1517,7 @@ function bindRunEvents() {
     // Close the ⋯ menu on any click outside it or on one of its items.
     const menu = $('.menu[open]');
     if (menu && (!menu.contains(event.target) || event.target.closest('.menu-list'))) menu.open = false;
+    if (!event.target.closest('.picker')) closePickers();
     const button = event.target.closest('[data-action]');
     if (button) handleAction(button.dataset.action, button.dataset.id, button);
   });
@@ -1243,6 +1539,36 @@ function bindRunEvents() {
     if (event.target.value === OTHER) showOtherSpecies();
     else updateEvolvePreview();
   });
+  document.addEventListener('input', (event) => {
+    if (event.target.matches('.picker-filter')) filterPicker(event.target);
+  });
+  document.addEventListener('keydown', (event) => {
+    const picker = event.target.closest?.('.picker');
+    if (!picker) return;
+    const panel = picker.querySelector('.picker-panel');
+    if (event.key === 'Escape' && !panel.hidden) {
+      // Close the dropdown, not the whole dialog.
+      event.preventDefault();
+      closePickers();
+      picker.querySelector('.picker-trigger').focus();
+    } else if (event.key === 'Enter' && event.target.matches('.picker-filter')) {
+      event.preventDefault();
+      const first = [...panel.querySelectorAll('.picker-row[data-species]')].find((r) => !r.hidden && r.dataset.species);
+      if (first) pickSpecies(picker, first.dataset.species);
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !panel.hidden) {
+      event.preventDefault();
+      const rows = [...panel.querySelectorAll('.picker-row')].filter((r) => !r.hidden && !r.closest('.picker-group[hidden]'));
+      const at = rows.indexOf(document.activeElement);
+      const next = event.key === 'ArrowDown' ? rows[Math.min(rows.length - 1, at + 1)] : (at <= 0 ? panel.querySelector('.picker-filter') : rows[at - 1]);
+      next?.focus();
+    }
+  });
+  $('#link-form').locationPick.addEventListener('change', onLocationPicked);
+  $('#link-form').location.addEventListener('change', () => {
+    if ($('#link-form').locationPick.value === OTHER_LOCATION) {
+      renderLinkPlayerFields(state.links.find((l) => l.id === editingId), { keepEntries: true });
+    }
+  });
   $('#link-form').status.addEventListener('change', updateDeathFields);
   $('#settings-form').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -1259,6 +1585,7 @@ function bindRunEvents() {
 }
 
 function bindHomeEvents() {
+  document.querySelectorAll('.version-select').forEach((select) => { select.innerHTML = versionOptions(''); });
   $('#create-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.target;
@@ -1271,6 +1598,7 @@ function bindHomeEvents() {
       runName: form.runName.value.trim() || 'Soul Link',
       game: form.game.value.trim(),
       playerNames: [form.p1.value.trim(), form.p2.value.trim()],
+      versions: [form.v1.value, form.v2.value],
     }));
     location.hash = `run=${id}`;
   });

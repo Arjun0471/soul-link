@@ -891,3 +891,108 @@ button.shortcut .muted { font-weight: 500; font-size: 0.74rem; }
   font-size: 0.9rem;
 }
 .linked-to + .linked-to { margin-top: 6px; }
+
+/* ---------- game versions & route-aware dropdowns ---------- */
+
+.version-tag {
+  display: inline-grid;
+  place-items: center;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font: 800 0.66rem/1.2 var(--font);
+  letter-spacing: 0.06em;
+  color: #fff;
+  vertical-align: 2px;
+}
+.version-tag.v-omega-ruby { background: linear-gradient(135deg, #d7263d, #8c1c2b); }
+.version-tag.v-alpha-sapphire { background: linear-gradient(135deg, #2d6cdf, #1b3f8f); }
+legend .version-tag { margin-left: 2px; }
+
+select[name="locationPick"] + input { margin-top: 8px; }
+.party-check { align-self: end; padding-bottom: 10px; }
+
+.picker { display: grid; gap: 6px; }
+.picker-label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.picker-label .muted { font-weight: 500; }
+.picker-trigger {
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: left;
+  font-weight: 500;
+  white-space: normal;
+}
+.picker-trigger[aria-expanded="true"] { border-color: var(--box); box-shadow: 0 0 0 3px color-mix(in srgb, var(--box) 22%, transparent); }
+.picker-trigger .chevron { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+.picker-placeholder { color: var(--muted); }
+.picker-panel {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.picker-filter { padding: 8px 10px; }
+.picker-list { max-height: 300px; overflow-y: auto; display: grid; gap: 6px; overscroll-behavior: contain; }
+.picker-group { display: grid; gap: 2px; }
+.picker-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 6px;
+  background: var(--surface);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.picker-row, .picker-trigger:has(.row-main) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.picker-row {
+  justify-content: flex-start;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  font-weight: 500;
+  white-space: normal;
+}
+.picker-row:hover, .picker-row:focus-visible { background: var(--surface-2); border-color: var(--border); outline: none; }
+.picker-row[aria-selected="true"] { background: color-mix(in srgb, var(--box) 10%, var(--surface)); border-color: color-mix(in srgb, var(--box) 40%, transparent); }
+.picker-row.picker-extra { padding: 8px 10px; color: var(--muted); font-weight: 600; }
+.picker-row .mini, .picker-trigger .mini { width: 40px; height: 40px; margin: -4px 0; flex: none; }
+.row-main { display: grid; gap: 3px; min-width: 0; }
+.row-name { font-weight: 700; }
+.row-main .types { justify-content: flex-start; }
+.row-main .type { font-size: 0.56rem; padding: 2px 5px; }
+.row-meta { margin-left: auto; display: grid; justify-items: end; gap: 3px; text-align: right; }
+.row-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
+.method {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.row-sub { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.excl { color: var(--accent); font-weight: 700; }
+.dupe { color: var(--warn); font-weight: 700; }
+
+@media (max-width: 480px) {
+  .row-meta .row-tags { display: none; }
+}
