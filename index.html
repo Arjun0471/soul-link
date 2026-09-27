@@ -7,16 +7,27 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="icon" href="favicon.png" type="image/png" sizes="180x180">
   <link rel="apple-touch-icon" href="favicon.png">
-  <meta name="theme-color" content="#6b4fd8">
+  <meta name="theme-color" content="#12151f">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <!-- Home: create or join a run -->
   <div id="home-view" hidden>
-    <header class="hero">
-      <h1>Soul Link Tracker</h1>
-      <p class="muted">Track a Pokémon Soul Link run together. Every encounter is chained to your partner's: if one faints, both are gone.</p>
-      <p id="home-mode" class="notice" hidden></p>
+    <header class="banner home-banner">
+      <div class="banner-inner">
+        <div class="brand">
+          <img src="favicon.svg" alt="" class="brand-logo">
+          <div>
+            <p class="eyebrow">Pokémon Nuzlocke</p>
+            <h1>Soul Link Tracker</h1>
+          </div>
+        </div>
+        <p class="tagline">Every catch is chained to your partner's. If one falls, both do. Track the run together, live, from anywhere.</p>
+        <p id="home-mode" class="notice glass-notice" hidden></p>
+      </div>
     </header>
     <main class="home-grid">
       <form id="create-form" class="panel">
@@ -29,22 +40,22 @@
         </label>
         <div class="row">
           <label>Player 1
-            <input name="p1" required placeholder="Ash" autocomplete="off">
+            <input name="p1" required placeholder="Red" autocomplete="off">
           </label>
           <label>Player 2
-            <input name="p2" required placeholder="Gary" autocomplete="off">
+            <input name="p2" required placeholder="Blue" autocomplete="off">
           </label>
         </div>
-        <button type="submit" class="primary">Create run</button>
+        <button type="submit" class="primary big">Create run</button>
       </form>
 
       <form id="join-form" class="panel">
         <h2>Join a run</h2>
-        <p class="muted">Paste the link or run code your partner shared.</p>
+        <p class="muted">Paste the link or run code your partner sent you.</p>
         <label>Link or code
           <input name="code" required placeholder="https://…/#run=abc123" autocomplete="off">
         </label>
-        <button type="submit">Join run</button>
+        <button type="submit" class="big">Join run</button>
         <div id="recent-runs"></div>
       </form>
     </main>
@@ -52,51 +63,70 @@
 
   <!-- Run view -->
   <div id="run-view" hidden>
-    <header class="topbar">
-      <div class="title-block">
-        <a href="./" class="home-link" title="All runs">← Runs</a>
-        <h1 id="run-name">Soul Link</h1>
-        <p id="run-meta" class="muted"></p>
+    <header class="banner">
+      <div class="banner-inner">
+        <div class="banner-top">
+          <a href="./" class="home-link">← All runs</a>
+          <span id="sync-status" class="pill">Connecting…</span>
+        </div>
+        <div class="banner-main">
+          <div class="title-block">
+            <p class="eyebrow" id="run-game"></p>
+            <h1 id="run-name">Soul Link</h1>
+            <div class="players" id="run-players"></div>
+          </div>
+          <nav class="toolbar">
+            <button type="button" class="primary" data-action="add" data-icon="plus">Encounter</button>
+            <button type="button" class="glass" data-action="share" data-icon="link"><span class="btn-label">Share</span></button>
+            <button type="button" class="glass" data-action="settings" data-icon="sliders"><span class="btn-label">Settings</span></button>
+            <details class="menu">
+              <summary class="button glass icon-only" aria-label="More" data-icon="dots"></summary>
+              <div class="menu-list">
+                <button type="button" data-action="export">Export backup</button>
+                <label class="button" for="import-file">Import backup</label>
+              </div>
+            </details>
+            <input type="file" id="import-file" accept="application/json,.json" hidden>
+          </nav>
+        </div>
+        <section class="stats" id="stats" aria-label="Run statistics"></section>
       </div>
-      <nav class="toolbar">
-        <span id="sync-status" class="pill">Connecting…</span>
-        <button type="button" class="primary" data-action="add">+ Encounter</button>
-        <button type="button" data-action="share">Copy share link</button>
-        <button type="button" data-action="settings">Settings</button>
-        <button type="button" data-action="export">Export</button>
-        <label class="button" for="import-file">Import</label>
-        <input type="file" id="import-file" accept="application/json,.json" hidden>
-      </nav>
     </header>
 
-    <main>
-      <p id="run-loading" class="muted">Loading run…</p>
+    <nav class="section-nav" id="section-nav" hidden>
+      <button type="button" data-action="jump" data-target="sec-teams">Teams</button>
+      <button type="button" data-action="jump" data-target="sec-alive">Alive <span class="count" id="nav-alive"></span></button>
+      <button type="button" data-action="jump" data-target="sec-dead">Graveyard <span class="count" id="nav-dead"></span></button>
+      <button type="button" data-action="jump" data-target="sec-missed">Failed <span class="count" id="nav-missed"></span></button>
+    </nav>
 
-      <div id="run-missing" class="panel" hidden>
+    <main>
+      <p id="run-loading" class="loading">Loading run…</p>
+
+      <div id="run-missing" class="panel narrow" hidden>
         <h2>Run not found</h2>
         <p class="muted">Nothing is stored under this run code yet. Check the link, or start a fresh run with this code.</p>
         <button type="button" class="primary" data-action="init-missing">Start a run with this code</button>
       </div>
 
       <div id="run-content" hidden>
-        <section class="stats" id="stats" aria-label="Run statistics"></section>
         <div id="warnings" role="status"></div>
 
-        <section class="group">
-          <h2>Teams</h2>
-          <div class="parties" id="parties"></div>
+        <section class="group" id="sec-teams">
+          <h2 data-icon="ball">Teams</h2>
+          <div class="teams" id="parties"></div>
         </section>
-        <section class="group">
-          <h2>Alive <span class="count" id="count-alive"></span></h2>
+        <section class="group" id="sec-alive">
+          <h2 data-icon="link">Linked encounters <span class="count" id="count-alive"></span></h2>
           <div class="cards" id="list-alive"></div>
         </section>
-        <section class="group">
-          <h2>Graveyard <span class="count" id="count-dead"></span></h2>
+        <section class="group graveyard" id="sec-dead">
+          <h2 data-icon="grave">Graveyard <span class="count" id="count-dead"></span></h2>
           <div class="cards" id="list-dead"></div>
         </section>
-        <section class="group">
-          <h2>Failed / skipped <span class="count" id="count-missed"></span></h2>
-          <div class="cards" id="list-missed"></div>
+        <section class="group" id="sec-missed">
+          <h2 data-icon="x">Failed / skipped <span class="count" id="count-missed"></span></h2>
+          <div class="cards compact-list" id="list-missed"></div>
         </section>
       </div>
     </main>

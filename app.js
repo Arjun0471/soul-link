@@ -430,10 +430,38 @@ const monName = (enc) => enc?.nickname || prettySpecies(enc?.species) || '—';
 
 // ---------- rendering ----------
 
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/>',
+  sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  dots: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  grave: '<path d="M6 21V10a6 6 0 0 1 12 0v11z"/><path d="M3 21h18M12 8v6M9.5 10.5h5"/>',
+  ball: '<circle cx="12" cy="12" r="9"/><path d="M3 12h6M15 12h6"/><circle cx="12" cy="12" r="3"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+};
+const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+
+const artworkUrl = (dexId) =>
+  `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dexId}.png`;
+
+// Players are colour-coded like the games: Red, Blue, then Green and Yellow.
+function playerStyle(playerId) {
+  const index = Math.max(0, state.players.findIndex((p) => p.id === playerId));
+  return `--pc: var(--p${(index % 4) + 1})`;
+}
+
+const avatar = (player, extra = '') =>
+  `<span class="avatar ${extra}" style="${playerStyle(player.id)}" aria-hidden="true">${esc((player.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+
 function renderSync(connected) {
   const pill = $('#sync-status');
   if (store?.mode === 'firebase') {
-    pill.textContent = connected ? '● Live' : '○ Offline, will sync';
+    pill.textContent = connected ? 'Live' : 'Offline · will sync';
     pill.className = `pill ${connected ? 'ok' : 'warn'}`;
     pill.title = connected
       ? 'Changes are shared with everyone who has the link.'
@@ -445,69 +473,105 @@ function renderSync(connected) {
   }
 }
 
-function spriteHtml(enc) {
-  return enc.dexId
-    ? `<img src="${spriteUrl(enc.dexId)}" alt="" loading="lazy" onerror="this.remove()">`
-    : '<div class="sprite-placeholder">?</div>';
+// Official artwork, falling back to the pixel sprite, then to a Poké Ball outline.
+function artHtml(enc, cls = 'art') {
+  if (!enc?.dexId) return `<span class="${cls} placeholder">${icon('ball')}</span>`;
+  const fallback = spriteUrl(enc.dexId);
+  return `<img class="${cls}" src="${artworkUrl(enc.dexId)}" alt="" loading="lazy" onerror="if(this.dataset.fb){this.remove()}else{this.dataset.fb=1;this.classList.add('pixel');this.src='${fallback}'}">`;
+}
+
+function miniSprite(enc) {
+  return enc?.dexId
+    ? `<img class="mini" src="${spriteUrl(enc.dexId)}" alt="" loading="lazy" onerror="this.remove()">`
+    : '';
 }
 
 const typesHtml = (enc) =>
-  (enc.types || []).map((t) => `<span class="type t-${esc(t)}">${esc(t)}</span>`).join('');
+  `<div class="types">${(enc.types || []).map((t) => `<span class="type t-${esc(t)}">${esc(t)}</span>`).join('')}</div>`;
+
+// Tints a tile with its primary type colour.
+const tint = (enc) => (enc?.types?.[0] ? ` tint t-${esc(enc.types[0])}` : ' tint');
+
+function speciesLine(enc) {
+  const parts = [];
+  if (enc.nickname) parts.push(esc(prettySpecies(enc.species)));
+  if (enc.caughtAs) parts.push(`caught as ${esc(prettySpecies(enc.caughtAs))}`);
+  return parts.length ? `<div class="species">${parts.join(' · ')}</div>` : '';
+}
+
+function moveButton(linkId, playerId, inParty, compact = false) {
+  const attrs = `data-id="${esc(linkId)}" data-player="${esc(playerId)}"`;
+  return inParty
+    ? `<button type="button" class="move to-box" data-action="to-box" ${attrs} title="Move to the box">${icon('down')}${compact ? '' : 'Box'}</button>`
+    : `<button type="button" class="move to-party" data-action="to-party" ${attrs} title="Move to the party">${icon('up')}${compact ? '' : 'Party'}</button>`;
+}
 
 function renderMon(link, player, conflicts) {
   const enc = link.encounters?.[player.id];
+  const head = (extra = '') => `<div class="mon-head">${avatar(player, 'sm')}<span class="owner">${esc(player.name)}</span>${extra}</div>`;
   if (!enc?.species) {
-    return `<div class="mon empty"><div class="owner">${esc(player.name)}</div><div class="muted">No encounter</div></div>`;
+    return `<div class="mon empty" style="${playerStyle(player.id)}">${head()}<span class="art placeholder">${icon('ball')}</span><div class="muted">No encounter</div></div>`;
   }
   const alive = link.status === 'alive';
   const fainted = link.status === 'dead' && (link.fainted === player.id || link.fainted === 'all');
   const clash = conflicts.byMon.get(`${link.id}/${player.id}`);
-  const species = prettySpecies(enc.species);
-  const speciesLine = enc.nickname || enc.caughtAs
-    ? `<div class="species">${esc(enc.nickname ? species : '')}${enc.caughtAs ? `${enc.nickname ? ' · ' : ''}caught as ${esc(prettySpecies(enc.caughtAs))}` : ''}</div>`
-    : '';
+  const badge = alive
+    ? `<span class="where ${enc.inParty ? 'party' : 'box'}">${enc.inParty ? 'Party' : 'Box'}</span>`
+    : fainted ? `<span class="where fainted-badge">${icon('grave')}Fainted</span>` : '';
   const controls = alive ? `
       <div class="mon-actions">
         ${moveButton(link.id, player.id, enc.inParty)}
-        <button type="button" data-action="evolve" data-id="${esc(link.id)}" data-player="${esc(player.id)}">Evolve</button>
+        <button type="button" class="ghost" data-action="evolve" data-id="${esc(link.id)}" data-player="${esc(player.id)}">${icon('spark')}Evolve</button>
       </div>` : '';
   return `
-    <div class="mon${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}">
-      <div class="owner">${esc(player.name)}${fainted ? ' <span title="Fainted">💀</span>' : ''}${alive ? ` <span class="where ${enc.inParty ? 'party' : 'box'}">${enc.inParty ? 'Party' : 'Box'}</span>` : ''}</div>
-      ${spriteHtml(enc)}
+    <div class="mon${tint(enc)}${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}" style="${playerStyle(player.id)}">
+      ${head(badge)}
+      ${artHtml(enc)}
       <div class="nickname">${esc(monName(enc))}</div>
-      ${speciesLine}
-      <div class="types">${typesHtml(enc)}</div>
-      ${clash ? `<div class="clash-note">${esc(clash)} clash</div>` : ''}
+      ${speciesLine(enc)}
+      ${typesHtml(enc)}
+      ${clash ? `<div class="clash-note">${esc(clash)}-type clash</div>` : ''}
       ${controls}
     </div>`;
 }
 
 function renderCard(link, conflicts) {
-  const mons = state.players.map((p) => renderMon(link, p, conflicts)).join('<span class="chain" aria-hidden="true">⛓</span>');
+  const edit = `<button type="button" class="ghost icon-only" data-action="edit" data-id="${esc(link.id)}" title="Edit" aria-label="Edit">${icon('edit')}</button>`;
+  const location = `<span class="loc">${icon('pin')}${esc(link.location || 'Unknown location')}</span>`;
+
+  if (link.status === 'missed') {
+    const who = state.players
+      .map((p) => {
+        const enc = link.encounters?.[p.id];
+        return enc?.species ? `${esc(p.name)}: ${esc(monName(enc))}` : '';
+      }).filter(Boolean).join(' · ');
+    return `
+      <article class="card compact status-missed" data-id="${esc(link.id)}">
+        <header>${location}${edit}</header>
+        ${who ? `<p class="muted">${who}</p>` : ''}
+        ${link.notes ? `<p class="notes">${esc(link.notes)}</p>` : ''}
+      </article>`;
+  }
+
+  const mons = state.players.map((p) => renderMon(link, p, conflicts))
+    .join(`<span class="chain" aria-hidden="true">${icon('link')}</span>`);
   const actions = [];
   if (link.status === 'alive') {
     const encs = state.players.map((p) => link.encounters?.[p.id]).filter((e) => e?.species);
-    if (encs.length > 1 && encs.some((e) => !e.inParty)) actions.push(['pair-party', 'Pair → party']);
-    if (encs.length > 1 && encs.some((e) => e.inParty)) actions.push(['pair-box', 'Pair → box']);
-    actions.push(['kill', 'Fainted…']);
+    if (encs.length > 1 && encs.some((e) => !e.inParty)) actions.push(['pair-party', `${icon('up')}Pair to party`, 'ghost']);
+    if (encs.length > 1 && encs.some((e) => e.inParty)) actions.push(['pair-box', `${icon('down')}Pair to box`, 'ghost']);
+    actions.push(['kill', `${icon('grave')}Fainted…`, 'ghost danger push']);
   }
-  actions.push(['edit', 'Edit']);
-  const cause = link.status === 'dead' && link.cause ? `<p class="cause">☠ ${esc(link.cause)}</p>` : '';
+  const cause = link.status === 'dead'
+    ? `<p class="epitaph">${link.cause ? esc(link.cause) : 'Fell in battle.'}</p>` : '';
   return `
     <article class="card status-${esc(link.status)}" data-id="${esc(link.id)}">
-      <header><span class="location">${esc(link.location || 'Unknown location')}</span></header>
+      <header>${location}${edit}</header>
       <div class="pair">${mons}</div>
       ${cause}
       ${link.notes ? `<p class="notes">${esc(link.notes)}</p>` : ''}
-      <footer>${actions.map(([a, label]) => `<button type="button" data-action="${a}" data-id="${esc(link.id)}">${label}</button>`).join('')}</footer>
+      ${actions.length ? `<footer>${actions.map(([a, label, cls]) => `<button type="button" class="${cls}" data-action="${a}" data-id="${esc(link.id)}">${label}</button>`).join('')}</footer>` : ''}
     </article>`;
-}
-
-function moveButton(linkId, playerId, inParty) {
-  return inParty
-    ? `<button type="button" class="move to-box" data-action="to-box" data-id="${esc(linkId)}" data-player="${esc(playerId)}" title="Move to the box">↓ Box</button>`
-    : `<button type="button" class="move to-party" data-action="to-party" data-id="${esc(linkId)}" data-player="${esc(playerId)}" title="Move to the party">↑ Party</button>`;
 }
 
 function partnerLine(link, playerId) {
@@ -515,8 +579,8 @@ function partnerLine(link, playerId) {
     .map((p) => {
       const other = link.encounters?.[p.id];
       if (!other?.species) return '';
-      return `${esc(monName(other))}${other.inParty ? '' : ' <span class="muted">(box)</span>'}`;
-    }).filter(Boolean).join(', ');
+      return `<span class="partner-mon">${miniSprite(other)}${esc(monName(other))}${other.inParty ? '' : '<em>box</em>'}</span>`;
+    }).filter(Boolean).join('');
 }
 
 function slotHtml(link, player, conflicts) {
@@ -524,32 +588,55 @@ function slotHtml(link, player, conflicts) {
   const partners = partnerLine(link, player.id);
   const clash = conflicts.byMon.has(`${link.id}/${player.id}`);
   return `
-    <div class="slot${clash ? ' clash' : ''}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
-      ${spriteHtml(enc)}
+    <div class="slot${tint(enc)}${clash ? ' clash' : ''}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
+      ${artHtml(enc)}
       <div class="nickname">${esc(monName(enc))}</div>
-      <div class="types">${typesHtml(enc)}</div>
-      ${partners ? `<div class="partner">⛓ ${partners}</div>` : ''}
-      ${moveButton(link.id, player.id, enc.inParty)}
+      ${speciesLine(enc)}
+      ${typesHtml(enc)}
+      ${partners ? `<div class="partner" title="Soul-linked partner">${icon('link')}${partners}</div>` : ''}
+      ${moveButton(link.id, player.id, true)}
     </div>`;
 }
 
-// One panel per player: their party (6 slots) with their box underneath.
+function boxChipHtml(link, player) {
+  const enc = link.encounters[player.id];
+  return `
+    <div class="slot chip${tint(enc)}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
+      ${artHtml(enc, 'art sm')}
+      <div class="chip-text">
+        <div class="nickname">${esc(monName(enc))}</div>
+        ${typesHtml(enc)}
+      </div>
+      ${moveButton(link.id, player.id, false, true)}
+    </div>`;
+}
+
+// One panel per player: their party (6 slots) with their PC box underneath.
 // Slots can be dragged between the two on desktop; buttons work everywhere.
 function renderTeams(conflicts) {
   $('#parties').innerHTML = state.players.map((player) => {
     const party = partyOf(player.id);
     const box = boxOf(player.id);
+    const pips = Array.from({ length: PARTY_LIMIT }, (_, i) => `<i class="${i < party.length ? 'on' : ''}"></i>`).join('');
     const open = Array.from({ length: Math.max(0, PARTY_LIMIT - party.length) },
-      () => '<div class="slot open"><span>Empty</span></div>').join('');
+      () => `<div class="slot open">${icon('ball')}<span>Empty</span></div>`).join('');
     return `
-      <div class="team">
-        <h3>${esc(player.name)}'s party <span class="count${party.length >= PARTY_LIMIT ? ' full' : ''}">${party.length}/${PARTY_LIMIT}</span></h3>
-        <div class="slots drop" data-drop="party" data-player="${esc(player.id)}">
+      <div class="team" style="${playerStyle(player.id)}">
+        <header class="team-head">
+          ${avatar(player)}
+          <div>
+            <h3>${esc(player.name)}</h3>
+            <div class="pips" title="${party.length} of ${PARTY_LIMIT} party slots used">${pips}<span class="party-count">${party.length}/${PARTY_LIMIT}</span></div>
+          </div>
+        </header>
+        <div class="party-grid drop" data-drop="party" data-player="${esc(player.id)}">
           ${party.map((link) => slotHtml(link, player, conflicts)).join('')}${open}
         </div>
-        <h4>Box <span class="count">${box.length}</span></h4>
-        <div class="slots box-slots drop" data-drop="box" data-player="${esc(player.id)}">
-          ${box.length ? box.map((link) => slotHtml(link, player, conflicts)).join('') : '<p class="empty">Box is empty.</p>'}
+        <div class="box-tray">
+          <div class="tray-label">PC Box <span class="count">${box.length}</span></div>
+          <div class="box-grid drop" data-drop="box" data-player="${esc(player.id)}">
+            ${box.length ? box.map((link) => boxChipHtml(link, player)).join('') : '<p class="empty">Empty. Drag Pokémon here to box them.</p>'}
+          </div>
         </div>
       </div>`;
   }).join('');
@@ -559,12 +646,16 @@ function renderRun() {
   $('#run-loading').hidden = true;
   $('#run-missing').hidden = state.exists;
   $('#run-content').hidden = !state.exists;
+  $('#section-nav').hidden = !state.exists;
   if (!state.exists) return;
 
   const { meta, players } = state;
   document.title = `${meta.runName} · Soul Link Tracker`;
   $('#run-name').textContent = meta.runName;
-  $('#run-meta').textContent = [meta.game, players.map((p) => p.name).join(' ⛓ ')].filter(Boolean).join(' · ');
+  $('#run-game').textContent = meta.game ? `Pokémon ${meta.game.replace(/^pok[eé]mon\s+/i, '')}` : 'Soul Link run';
+  $('#run-players').innerHTML = players
+    .map((p) => `<span class="player-chip">${avatar(p, 'sm')}${esc(p.name)}</span>`)
+    .join(`<span class="chain-sm">${icon('link')}</span>`);
   rememberRecent(runId, meta.runName);
 
   // A fix-up write re-renders through the subscription, so stop here.
@@ -576,22 +667,24 @@ function renderRun() {
   for (const status of STATUSES) {
     const links = groups[status];
     $(`#count-${status}`).textContent = links.length;
+    $(`#nav-${status}`).textContent = links.length;
+    const ordered = status === 'dead' ? [...links].reverse() : links;
     $(`#list-${status}`).innerHTML = links.length
-      ? links.map((l) => renderCard(l, conflicts)).join('')
+      ? ordered.map((l) => renderCard(l, conflicts)).join('')
       : `<p class="empty">${EMPTY_TEXT[status]}</p>`;
   }
 
   const caught = groups.alive.length + groups.dead.length;
+  const survival = caught ? Math.round((groups.alive.length / caught) * 100) : null;
   $('#stats').innerHTML = [
-    ['Encounters', state.links.length],
-    ['Alive', groups.alive.length],
-    ['Dead', groups.dead.length],
-    ['Failed', groups.missed.length],
-    ['Survival', caught ? `${Math.round((groups.alive.length / caught) * 100)}%` : '—'],
-  ].map(([label, value]) => `<div class="stat"><span class="value">${value}</span><span class="label">${label}</span></div>`).join('');
+    ['Encounters', state.links.length, ''],
+    ['Alive', groups.alive.length, 'good'],
+    ['Fallen', groups.dead.length, 'bad'],
+    ['Failed', groups.missed.length, ''],
+  ].map(([label, value, cls]) => `<div class="stat ${cls}"><span class="value">${value}</span><span class="label">${label}</span></div>`).join('')
+    + `<div class="stat survival"><span class="value">${survival == null ? '—' : `${survival}%`}</span><span class="label">Survival</span><span class="bar"><i style="width:${survival ?? 0}%"></i></span></div>`;
 
-  const warnings = conflicts.messages;
-  $('#warnings').innerHTML = warnings.map((w) => `<p class="warning">⚠ ${esc(w)}</p>`).join('');
+  $('#warnings').innerHTML = conflicts.messages.map((w) => `<p class="warning">${esc(w)}</p>`).join('');
 
   resolveMissingPokemonData();
 }
@@ -599,7 +692,7 @@ function renderRun() {
 function renderRecentRuns() {
   const recent = lsGet(KEYS.recent, []);
   $('#recent-runs').innerHTML = recent.length
-    ? `<h3>Recent runs</h3><ul>${recent.map((r) => `<li><a href="#run=${esc(r.id)}">${esc(r.name || r.id)}</a></li>`).join('')}</ul>`
+    ? `<h3>Recent runs</h3><ul>${recent.map((r) => `<li><a href="#run=${esc(r.id)}">${icon('ball')}<span>${esc(r.name || r.id)}</span><span class="muted">${esc(r.id)}</span></a></li>`).join('')}</ul>`
     : '';
 }
 
@@ -621,8 +714,8 @@ function openLinkDialog(link, presetStatus) {
     // New catches go to the party while that player has room.
     const inParty = room && (link ? enc.inParty : true);
     return `
-      <fieldset>
-        <legend>${esc(p.name)}</legend>
+      <fieldset style="${playerStyle(p.id)}">
+        <legend>${avatar(p, 'sm')}${esc(p.name)}</legend>
         <div class="row">
           <label>Pokémon
             <input name="species-${esc(p.id)}" list="species-list" value="${esc(prettySpecies(enc.species))}" placeholder="Leave blank if none" autocomplete="off">
@@ -851,9 +944,9 @@ function openSwapDialog(linkId, playerId) {
     const enc = link.encounters[playerId];
     return `
       <button type="button" class="swap-option" data-action="swap-pick" data-id="${esc(link.id)}">
-        ${spriteHtml(enc)}
+        ${artHtml(enc, 'art sm')}
         <span class="nickname">${esc(monName(enc))}</span>
-        <span class="types">${typesHtml(enc)}</span>
+        ${typesHtml(enc)}
       </button>`;
   }).join('');
   $('#swap-dialog').showModal();
@@ -936,6 +1029,7 @@ function handleAction(action, id, button) {
       saveEvolution(button.dataset.species);
       return $('#evolve-dialog').close();
     case 'share': return copyShareLink();
+    case 'jump': return document.getElementById(button.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     case 'settings': return openSettings();
     case 'export': return exportRun();
     case 'close-dialog': return document.querySelector('dialog[open]')?.close();
@@ -959,6 +1053,9 @@ function handleAction(action, id, button) {
 function bindRunEvents() {
   bindDragAndDrop();
   document.addEventListener('click', (event) => {
+    // Close the ⋯ menu on any click outside it or on one of its items.
+    const menu = $('.menu[open]');
+    if (menu && (!menu.contains(event.target) || event.target.closest('.menu-list'))) menu.open = false;
     const button = event.target.closest('[data-action]');
     if (button) handleAction(button.dataset.action, button.dataset.id, button);
   });
@@ -1014,6 +1111,7 @@ function bindHomeEvents() {
 // ---------- boot ----------
 
 async function main() {
+  document.querySelectorAll('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)));
   // Switching runs gets a clean page so no old subscription lingers.
   window.addEventListener('hashchange', () => location.reload());
   runId = parseRunId(location.hash);
