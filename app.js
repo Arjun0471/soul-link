@@ -2,15 +2,19 @@ import { firebaseConfig } from './firebase-config.js';
 
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
 const POKEAPI = 'https://pokeapi.co/api/v2';
-const spriteUrl = (dexId) =>
-  `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${dexId}.png`;
+const spriteUrl = (dexId, shiny = false) =>
+  `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${shiny ? 'shiny/' : ''}${dexId}.png`;
 
 const PARTY_LIMIT = 6;
 // A link is alive, dead or missed as a whole. Party vs box is tracked per
 // player on each encounter (`inParty`), since partners needn't both be in the party.
 const STATUSES = ['alive', 'dead', 'missed'];
+// Page sections: half-caught pairs and shiny-clause catches get their own.
+const SECTIONS = ['waiting', 'alive', 'shiny', 'dead', 'missed'];
 const EMPTY_TEXT = {
-  alive: 'No living Pokémon yet.',
+  waiting: '',
+  shiny: '',
+  alive: 'No complete pairs yet.',
   dead: 'Nobody has fallen. Yet.',
   missed: 'No failed encounters.',
 };
@@ -77,12 +81,32 @@ const prettySpecies = (slug) =>
     .map((part) => part[0].toUpperCase() + part.slice(1)).join(' ');
 
 let toastTimer;
-function toast(message) {
+function toast(message, action) {
   const el = $('#toast');
-  el.textContent = message;
+  el.replaceChildren(Object.assign(document.createElement('span'), { textContent: message }));
+  if (action) {
+    const button = Object.assign(document.createElement('button'), { type: 'button', className: 'toast-action', textContent: action.label });
+    button.addEventListener('click', () => {
+      el.classList.remove('show');
+      action.run();
+    });
+    el.append(button);
+  }
+  el.classList.toggle('actionable', Boolean(action));
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 7000 : 3000);
+}
+
+// The stored form of a link, for putting it back with Undo.
+function snapshotLink(link) {
+  const { id, legacyStatus, ...rest } = link;
+  return clean(rest);
+}
+
+function undoToast(message, link) {
+  const saved = snapshotLink(link);
+  toast(message, { label: 'Undo', run: () => store.write({ [`links/${link.id}`]: saved }) });
 }
 
 // ---------- storage backends ----------
@@ -360,9 +384,21 @@ function resolveMissingPokemonData() {
   }
 }
 
+// A living pair where someone hasn't caught their half yet.
+function isIncomplete(link) {
+  if (link.status !== 'alive' || isShinyCatch(link)) return false;
+  const has = state.players.map((p) => Boolean(link.encounters?.[p.id]?.species));
+  return has.includes(true) && has.includes(false);
+}
+
 function groupLinks() {
-  const groups = { alive: [], dead: [], missed: [] };
-  for (const link of state.links) groups[link.status].push(link);
+  const groups = Object.fromEntries(SECTIONS.map((key) => [key, []]));
+  for (const link of state.links) {
+    if (link.status !== 'alive') groups[link.status].push(link);
+    else if (isShinyCatch(link)) groups.shiny.push(link);
+    else if (isIncomplete(link)) groups.waiting.push(link);
+    else groups.alive.push(link);
+  }
   return groups;
 }
 
@@ -487,8 +523,8 @@ const ICONS = {
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
-const artworkUrl = (dexId) =>
-  `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dexId}.png`;
+const artworkUrl = (dexId, shiny = false) =>
+  `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${shiny ? 'shiny/' : ''}${dexId}.png`;
 
 // Players are colour-coded like the games: Red, Blue, then Green and Yellow.
 function playerStyle(playerId) {
@@ -517,13 +553,13 @@ function renderSync(connected) {
 // Official artwork, falling back to the pixel sprite, then to a Poké Ball outline.
 function artHtml(enc, cls = 'art') {
   if (!enc?.dexId) return `<span class="${cls} placeholder">${icon('ball')}</span>`;
-  const fallback = spriteUrl(enc.dexId);
-  return `<img class="${cls}" src="${artworkUrl(enc.dexId)}" alt="" loading="lazy" onerror="if(this.dataset.fb){this.remove()}else{this.dataset.fb=1;this.classList.add('pixel');this.src='${fallback}'}">`;
+  const fallback = spriteUrl(enc.dexId, enc.shiny);
+  return `<img class="${cls}" src="${artworkUrl(enc.dexId, enc.shiny)}" alt="" loading="lazy" onerror="if(this.dataset.fb){this.remove()}else{this.dataset.fb=1;this.classList.add('pixel');this.src='${fallback}'}">`;
 }
 
 function miniSprite(enc) {
   return enc?.dexId
-    ? `<img class="mini" src="${spriteUrl(enc.dexId)}" alt="" loading="lazy" onerror="this.remove()">`
+    ? `<img class="mini" src="${spriteUrl(enc.dexId, enc.shiny)}" alt="" loading="lazy" onerror="this.remove()">`
     : '';
 }
 
@@ -567,16 +603,16 @@ function renderMon(link, player, conflicts) {
   const alive = link.status === 'alive';
   const fainted = link.status === 'dead' && (link.fainted === player.id || link.fainted === 'all');
   const clash = conflicts.byMon.get(`${link.id}/${player.id}`);
-  const badge = alive
+  const badge = (enc.shiny ? '<span class="where shiny-badge" title="Shiny">✨</span>' : '') + (alive
     ? `<span class="where ${enc.inParty ? 'party' : 'box'}">${enc.inParty ? 'Party' : 'Box'}</span>`
-    : fainted ? `<span class="where fainted-badge">${icon('grave')}Fainted</span>` : '';
+    : fainted ? `<span class="where fainted-badge">${icon('grave')}Fainted</span>` : '');
   const controls = alive ? `
       <div class="mon-actions">
         ${moveButton(link.id, player.id, enc.inParty)}
         ${evolveButton(link.id, player.id, enc)}
       </div>` : '';
   return `
-    <div class="mon${tint(enc)}${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}" style="${playerStyle(player.id)}">
+    <div class="mon${tint(enc)}${fainted ? ' fainted' : ''}${clash ? ' clash' : ''}${enc.shiny ? ' shiny' : ''}" style="${playerStyle(player.id)}">
       ${head(badge)}
       ${artHtml(enc)}
       <div class="nickname">${esc(monName(enc))}</div>
@@ -605,6 +641,19 @@ function renderCard(link, conflicts) {
       </article>`;
   }
 
+  if (isShinyCatch(link)) {
+    const owner = state.players.find((p) => p.id === link.owner);
+    if (!owner) return '';
+    return `
+    <article class="card shiny-catch status-${esc(link.status)}" data-id="${esc(link.id)}">
+      <header><span class="loc">✨ ${esc(link.location || 'Shiny clause')}</span><span class="clause-tag">Shiny clause · not linked</span>${edit}</header>
+      <div class="pair solo">${renderMon(link, owner, conflicts)}</div>
+      ${link.status === 'dead' ? `<p class="epitaph">${link.cause ? esc(link.cause) : 'Fell in battle.'}</p>` : ''}
+      ${link.notes ? `<p class="notes">${esc(link.notes)}</p>` : ''}
+      ${link.status === 'alive' ? `<footer><button type="button" class="ghost danger push" data-action="kill" data-id="${esc(link.id)}">${icon('grave')}Fainted…</button></footer>` : ''}
+    </article>`;
+  }
+
   const mons = state.players.map((p) => renderMon(link, p, conflicts))
     .join(`<span class="chain" aria-hidden="true">${icon('link')}</span>`);
   const actions = [];
@@ -624,6 +673,7 @@ function renderCard(link, conflicts) {
 }
 
 function partnerLine(link, playerId) {
+  if (isShinyCatch(link)) return '';
   return state.players.filter((p) => p.id !== playerId)
     .map((p) => {
       const other = link.encounters?.[p.id];
@@ -639,12 +689,13 @@ function slotHtml(link, player, conflicts) {
   const partners = partnerLine(link, player.id);
   const clash = conflicts.byMon.has(`${link.id}/${player.id}`);
   return `
-    <div class="slot${tint(enc)}${clash ? ' clash' : ''}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
+    <div class="slot${tint(enc)}${clash ? ' clash' : ''}${enc.shiny ? ' shiny' : ''}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
       ${artHtml(enc)}
       <div class="nickname">${esc(monName(enc))}</div>
       ${speciesLine(enc)}
       ${typesHtml(enc)}
       ${partners ? `<div class="partner" title="Soul-linked partner">${icon('link')}${partners}</div>` : ''}
+      ${isShinyCatch(link) ? '<div class="partner shiny-note">✨ Shiny clause · not linked</div>' : ''}
       <div class="slot-actions">
         ${moveButton(link.id, player.id, true)}
         ${evolveButton(link.id, player.id, enc)}
@@ -656,7 +707,7 @@ function slotHtml(link, player, conflicts) {
 function boxChipHtml(link, player) {
   const enc = link.encounters[player.id];
   return `
-    <div class="slot chip${tint(enc)}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
+    <div class="slot chip${tint(enc)}${enc.shiny ? ' shiny' : ''}" draggable="true" data-id="${esc(link.id)}" data-player="${esc(player.id)}" title="${esc(link.location)}">
       ${artHtml(enc, 'art sm')}
       <div class="chip-text">
         <div class="nickname">${esc(monName(enc))}</div>
@@ -722,22 +773,34 @@ function renderRun() {
   const groups = groupLinks();
   const conflicts = findTypeConflicts();
   renderTeams(conflicts);
-  for (const status of STATUSES) {
-    const links = groups[status];
-    $(`#count-${status}`).textContent = links.length;
-    $(`#nav-${status}`).textContent = links.length;
-    const ordered = status === 'dead' ? [...links].reverse() : links;
-    $(`#list-${status}`).innerHTML = links.length
+  for (const key of SECTIONS) {
+    const links = groups[key];
+    $(`#count-${key}`).textContent = links.length;
+    $(`#nav-${key}`).textContent = links.length;
+    // Optional sections only show up when they have something in them.
+    if (!EMPTY_TEXT[key]) {
+      $(`#sec-${key}`).hidden = !links.length;
+      $(`#nav-btn-${key}`).hidden = !links.length;
+    }
+    const ordered = key === 'dead' ? [...links].reverse() : links;
+    $(`#list-${key}`).innerHTML = links.length
       ? ordered.map((l) => renderCard(l, conflicts)).join('')
-      : `<p class="empty">${EMPTY_TEXT[status]}</p>`;
+      : `<p class="empty">${EMPTY_TEXT[key]}</p>`;
   }
+  if (!state.links.length) $('#list-alive').innerHTML = onboardingHtml();
+  renderGraveyardTally(groups.dead);
+  renderProgress();
 
-  const caught = groups.alive.length + groups.dead.length;
-  const survival = caught ? Math.round((groups.alive.length / caught) * 100) : null;
+  // Stats count route encounters; shiny-clause catches are extras.
+  const route = state.links.filter((l) => !isShinyCatch(l));
+  const routeAlive = route.filter((l) => l.status === 'alive').length;
+  const routeDead = route.filter((l) => l.status === 'dead').length;
+  const caught = routeAlive + routeDead;
+  const survival = caught ? Math.round((routeAlive / caught) * 100) : null;
   $('#stats').innerHTML = [
-    ['Encounters', state.links.length, ''],
-    ['Alive', groups.alive.length, 'good'],
-    ['Fallen', groups.dead.length, 'bad'],
+    ['Encounters', route.length, ''],
+    ['Alive', routeAlive, 'good'],
+    ['Fallen', routeDead, 'bad'],
     ['Failed', groups.missed.length, ''],
   ].map(([label, value, cls]) => `<div class="stat ${cls}"><span class="value">${value}</span><span class="label">${label}</span></div>`).join('')
     + `<div class="stat survival"><span class="value">${survival == null ? '—' : `${survival}%`}</span><span class="label">Survival</span><span class="bar"><i style="width:${survival ?? 0}%"></i></span></div>`;
@@ -747,6 +810,65 @@ function renderRun() {
   resolveMissingPokemonData();
   prefetchEvolutions();
   preloadGameData();
+}
+
+function onboardingHtml() {
+  const hasGames = state.players.some((p) => GAME_VERSIONS[p.version]);
+  return `
+    <div class="onboard">
+      <img src="favicon.svg" alt="" class="onboard-logo">
+      <h3>Your adventure starts here</h3>
+      <p class="muted">Add the first encounter for each route. Pairs are soul-linked: if one faints, both are gone.</p>
+      <button type="button" class="primary" data-action="add">${icon('plus')}Add your first encounter</button>
+      ${hasGames ? '' : `<p class="muted small">Tip: set what each of you is playing in <button type="button" class="link-button" data-action="settings">Settings</button> to get route-by-route Pokémon dropdowns.</p>`}
+      <p class="muted small">Shortcut: press <kbd>N</kbd> to add an encounter.</p>
+    </div>`;
+}
+
+// "Whose Pokémon fell": a light-hearted tally of who lost each pair.
+function renderGraveyardTally(dead) {
+  const counts = new Map(state.players.map((p) => [p.id, 0]));
+  for (const link of dead) {
+    const who = isShinyCatch(link) ? [link.owner] : link.fainted === 'all' ? state.players.map((p) => p.id) : [link.fainted];
+    for (const id of who) if (counts.has(id)) counts.set(id, counts.get(id) + 1);
+  }
+  const el = $('#dead-tally');
+  el.hidden = !dead.length;
+  el.innerHTML = dead.length
+    ? `Who fell: ${state.players.map((p) => `<span class="tally" style="${playerStyle(p.id)}">${avatar(p, 'sm')}${esc(p.name)} <strong>${counts.get(p.id)}</strong></span>`).join('')}`
+    : '';
+}
+
+// ---------- badges & level caps ----------
+
+// Gym order and the level of each leader's ace in Omega Ruby / Alpha Sapphire,
+// used as nuzlocke level caps. Editable in Settings (they vary by rule set).
+const ORAS_LEAGUE = [
+  ['Roxanne', 14], ['Brawly', 16], ['Wattson', 21], ['Flannery', 28],
+  ['Norman', 30], ['Winona', 33], ['Tate & Liza', 42], ['Wallace', 46],
+  ['Elite Four & Steven', 59],
+];
+
+function leagueSteps() {
+  const oras = state.players.some((p) => GAME_VERSIONS[p.version]?.file === 'data/oras.json');
+  const base = oras ? ORAS_LEAGUE : [...Array.from({ length: 8 }, (_, i) => [`Gym ${i + 1}`, null]), ['Pokémon League', null]];
+  const custom = String(state.meta.levelCaps || '').split(/[\s,]+/).filter(Boolean).map(Number);
+  return base.map(([name, cap], i) => ({ name, cap: custom[i] > 0 ? custom[i] : cap }));
+}
+
+function renderProgress() {
+  const steps = leagueSteps();
+  const badges = Math.max(0, Math.min(8, Number(state.meta.badges) || 0));
+  const next = steps[badges];
+  const pips = steps.slice(0, 8).map((step, i) => {
+    const on = i < badges;
+    // Clicking the last earned badge un-earns it; any other sets the count.
+    const target = i + 1 === badges ? i : i + 1;
+    return `<button type="button" class="badge-pip${on ? ' on' : ''}" data-action="set-badges" data-count="${target}" title="${esc(step.name)}${step.cap ? ` · Lv ${step.cap}` : ''}" aria-label="${on ? 'Earned' : 'Not earned'}: ${esc(step.name)}"><span>${i + 1}</span></button>`;
+  }).join('');
+  $('#run-progress').innerHTML = `
+    <div class="badge-row" aria-label="Badges earned">${pips}</div>
+    <p class="next-up">${badges === 8 ? 'Next: ' : `Next gym: `}<strong>${esc(next.name)}</strong>${next.cap ? ` · Level cap <strong>${next.cap}</strong>` : ''}</p>`;
 }
 
 function renderRecentRuns() {
@@ -967,8 +1089,12 @@ function filterPicker(filter) {
 
 const OTHER_LOCATION = '__other';
 
-function setupLocationField(current, editingLinkId) {
-  const form = $('#link-form');
+// Shiny-clause catches don't use up a route.
+const isShinyCatch = (link) => link?.clause === 'shiny';
+
+// Turns a form's location text field into a dropdown of known locations
+// (visited ones marked done), with "Other location…" for anything else.
+function setupLocationField(form, current, { editingLinkId = null, required = true } = {}) {
   const select = form.locationPick;
   const input = form.location;
   const locations = knownLocations();
@@ -977,35 +1103,36 @@ function setupLocationField(current, editingLinkId) {
     select.hidden = true;
     select.required = false;
     input.hidden = false;
-    input.required = true;
+    input.required = required;
     return;
   }
-  const used = new Set(state.links.filter((l) => l.id !== editingLinkId).map((l) => (l.location || '').trim().toLowerCase()));
-  select.innerHTML = '<option value="">Choose a location…</option>'
+  const used = new Set(state.links
+    .filter((l) => l.id !== editingLinkId && !isShinyCatch(l))
+    .map((l) => (l.location || '').trim().toLowerCase()));
+  select.innerHTML = `<option value="">${required ? 'Choose a location…' : 'Location (optional)…'}</option>`
     + locations.map((name) => `<option value="${esc(name)}">${esc(name)}${used.has(name.toLowerCase()) ? '  ✓ done' : ''}</option>`).join('')
     + `<option value="${OTHER_LOCATION}">Other location…</option>`;
   const match = locations.find((name) => name.toLowerCase() === current.trim().toLowerCase());
   select.value = match || (current ? OTHER_LOCATION : '');
   if (match) input.value = match;
   select.hidden = false;
-  select.required = true;
+  select.required = required;
   const typing = select.value === OTHER_LOCATION;
   input.hidden = !typing;
-  input.required = typing;
+  input.required = required && typing;
 }
 
-function onLocationPicked() {
-  const form = $('#link-form');
+function onLocationPicked(form, rerender) {
   const typing = form.locationPick.value === OTHER_LOCATION;
   form.location.hidden = !typing;
-  form.location.required = typing;
+  form.location.required = typing && form.locationPick.required;
   if (typing) {
     form.location.value = '';
     form.location.focus();
   } else {
     form.location.value = form.locationPick.value;
   }
-  renderLinkPlayerFields(state.links.find((l) => l.id === editingId), { keepEntries: true });
+  rerender();
 }
 
 // ---------- encounter dialog ----------
@@ -1023,6 +1150,7 @@ function renderLinkPlayerFields(link, { keepEntries = false } = {}) {
       species: toSlug(form[`species-${p.id}`]?.value),
       nickname: form[`nickname-${p.id}`]?.value ?? '',
       inParty: form[`party-${p.id}`]?.checked,
+      shiny: form[`shiny-${p.id}`]?.checked,
     } : null;
     const alreadyIn = link?.status === 'alive' && enc.species && enc.inParty;
     const room = alreadyIn || partyOf(p.id).length < PARTY_LIMIT;
@@ -1030,6 +1158,7 @@ function renderLinkPlayerFields(link, { keepEntries = false } = {}) {
     const inParty = room && (typed ? typed.inParty : (link ? enc.inParty : true));
     const species = typed ? typed.species : enc.species;
     const nickname = typed ? typed.nickname : enc.nickname;
+    const shiny = typed ? typed.shiny : enc.shiny;
     return `
       <fieldset style="${playerStyle(p.id)}">
         <legend>${avatar(p, 'sm')}${esc(p.name)}${versionTag(p.version)}</legend>
@@ -1041,6 +1170,10 @@ function renderLinkPlayerFields(link, { keepEntries = false } = {}) {
           <label class="checkbox party-check">
             <input type="checkbox" name="party-${esc(p.id)}"${inParty ? ' checked' : ''}${room ? '' : ' disabled'}>
             ${room ? `In ${esc(p.name)}'s party` : `${esc(p.name)}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}), goes to the box`}
+          </label>
+          <label class="checkbox shiny-check">
+            <input type="checkbox" name="shiny-${esc(p.id)}"${shiny ? ' checked' : ''}>
+            ✨ Shiny
           </label>
         </div>
       </fieldset>`;
@@ -1055,7 +1188,7 @@ function openLinkDialog(link, presetStatus, faintedPlayerId) {
   $('#link-dialog-title').textContent = link ? 'Edit encounter' : 'Add encounter';
   form.querySelector('[data-action="delete-link"]').hidden = !link;
 
-  setupLocationField(link?.location || '', link?.id);
+  setupLocationField(form, link?.location || '', { editingLinkId: link?.id });
   renderLinkPlayerFields(link);
 
   const faintedOptions = state.players.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}'s Pokémon</option>`);
@@ -1069,6 +1202,7 @@ function openLinkDialog(link, presetStatus, faintedPlayerId) {
   updateDeathFields();
 
   renderIncompleteShortcuts(link);
+  $('#shiny-entry').hidden = Boolean(link) || state.meta.shinyClause === false;
   $('#link-dialog').showModal();
   if (presetStatus === 'dead') form.cause.focus();
   else (form.locationPick.hidden ? form.location : form.locationPick).focus();
@@ -1098,6 +1232,7 @@ function saveLinkForm() {
       bumped.push(p.name);
     }
     encounters[p.id] = { species, nickname: form[`nickname-${p.id}`].value.trim(), inParty };
+    if (form[`shiny-${p.id}`].checked) encounters[p.id].shiny = true;
     if (inParty) encounters[p.id].partySince = (wasIn && prev.partySince) || Date.now();
     if (prev?.caughtAs && prev.caughtAs !== species) encounters[p.id].caughtAs = prev.caughtAs;
     // Keep looked-up sprite/types unless the species changed.
@@ -1121,7 +1256,9 @@ function saveLinkForm() {
     link.cause = form.cause.value.trim();
   }
   store.write({ [`links/${id}`]: link });
-  if (bumped.length && status === 'alive') {
+  if (existing && existing.status !== 'dead' && status === 'dead') {
+    undoToast(`${link.location || 'That'} pair is gone. Rest in peace.`, existing);
+  } else if (bumped.length && status === 'alive') {
     toast(`${bumped.join(' and ')}'s party is full, so that Pokémon went to the box.`);
   }
 }
@@ -1131,9 +1268,8 @@ function saveLinkForm() {
 // Living links where some player hasn't caught their half yet.
 function incompleteLinks() {
   return state.links
-    .filter((link) => link.status === 'alive')
-    .map((link) => ({ link, missing: state.players.filter((p) => !link.encounters?.[p.id]?.species) }))
-    .filter(({ link, missing }) => missing.length && missing.length < state.players.length);
+    .filter(isIncomplete)
+    .map((link) => ({ link, missing: state.players.filter((p) => !link.encounters?.[p.id]?.species) }));
 }
 
 // In the Add encounter dialog: one-click shortcuts to finish half-caught pairs.
@@ -1199,10 +1335,107 @@ function saveCatch() {
     toast(`${playerName(playerId)}'s party is full, so it went to the box.`);
   }
   const enc = { species, nickname: form.nickname.value.trim(), inParty, ...knownPokemon(species) };
+  if (form.shiny.checked) enc.shiny = true;
   if (inParty) enc.partySince = Date.now();
   // Writes only this player's half so it can't clobber a partner's edit.
   store.write({ [`links/${linkId}/encounters/${playerId}`]: enc });
   catching = null;
+  return true;
+}
+
+// ---------- shiny clause ----------
+
+// A shiny can be caught anywhere, doesn't use up the route and isn't
+// soul-linked: it belongs to one player and dies alone.
+let shinyEditing = null;
+
+function openShinyDialog(link, presetStatus) {
+  if ($('#link-dialog').open) $('#link-dialog').close();
+  shinyEditing = link?.id || null;
+  const form = $('#shiny-form');
+  form.reset();
+  $('#shiny-title').textContent = link ? 'Edit shiny catch' : 'Shiny clause catch';
+  form.owner.innerHTML = state.players.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  form.owner.value = link?.owner || state.players[0]?.id;
+  setupLocationField(form, link?.location || '', { editingLinkId: link?.id, required: false });
+  const enc = link?.encounters?.[link.owner] || {};
+  form.nickname.value = enc.nickname || '';
+  form.status.value = presetStatus || link?.status || 'alive';
+  form.cause.value = link?.cause || '';
+  form.notes.value = link?.notes || '';
+  form.querySelector('[data-action="delete-shiny"]').hidden = !link;
+  renderShinyFields({ species: enc.species || '', inParty: link ? enc.inParty : true });
+  updateShinyDeath();
+  $('#shiny-dialog').showModal();
+  if (presetStatus === 'dead') form.cause.focus();
+  else ($('#shiny-species .picker-trigger') || form.species || form.owner).focus();
+}
+
+function renderShinyFields({ species, inParty } = {}) {
+  const form = $('#shiny-form');
+  const owner = state.players.find((p) => p.id === form.owner.value) || state.players[0];
+  const link = state.links.find((l) => l.id === shinyEditing);
+  const keep = species ?? toSlug(form.species?.value);
+  const checked = inParty ?? form.inParty.checked;
+  $('#shiny-species').innerHTML = speciesPickerHtml('species', owner, form.location.value, keep, { placeholder: 'Which shiny?', excludeLinkId: shinyEditing });
+  initPickers($('#shiny-species'));
+  const alreadyIn = link?.status === 'alive' && link.owner === owner.id && link.encounters?.[owner.id]?.inParty;
+  const room = alreadyIn || partyOf(owner.id).length < PARTY_LIMIT;
+  form.inParty.disabled = !room;
+  form.inParty.checked = room && checked;
+  $('#shiny-party-label').textContent = room
+    ? `In ${owner.name}'s party`
+    : `${owner.name}'s party is full (${PARTY_LIMIT}/${PARTY_LIMIT}), goes to the box`;
+}
+
+function updateShinyDeath() {
+  const form = $('#shiny-form');
+  form.querySelector('.shiny-death').hidden = form.status.value !== 'dead';
+}
+
+function saveShiny() {
+  const form = $('#shiny-form');
+  const species = toSlug(form.species?.value);
+  if (!species) {
+    toast('Pick the shiny Pokémon first.');
+    return false;
+  }
+  const owner = form.owner.value;
+  const existing = state.links.find((l) => l.id === shinyEditing);
+  const id = shinyEditing || newId();
+  const prev = existing?.encounters?.[existing.owner];
+  const wasIn = existing?.status === 'alive' && existing.owner === owner && prev?.inParty;
+  let inParty = form.inParty.checked && !form.inParty.disabled;
+  if (inParty && !wasIn && partyOf(owner).length >= PARTY_LIMIT) {
+    inParty = false;
+    toast(`${playerName(owner)}'s party is full, so it went to the box.`);
+  }
+  const enc = { species, nickname: form.nickname.value.trim(), inParty, shiny: true };
+  if (inParty) enc.partySince = (wasIn && prev.partySince) || Date.now();
+  if (prev?.caughtAs && prev.caughtAs !== species) enc.caughtAs = prev.caughtAs;
+  if (prev?.species === species && prev.types) Object.assign(enc, { dexId: prev.dexId, types: prev.types });
+  else Object.assign(enc, knownPokemon(species));
+  const status = form.status.value;
+  const link = {
+    clause: 'shiny',
+    owner,
+    location: form.location.value.trim(),
+    status,
+    encounters: { [owner]: enc },
+    notes: form.notes.value.trim(),
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+  };
+  if (status === 'dead') {
+    link.fainted = owner;
+    link.cause = form.cause.value.trim();
+  }
+  store.write({ [`links/${id}`]: link });
+  if (existing && existing.status !== 'dead' && status === 'dead') {
+    undoToast(`${monName(enc)} fainted.`, existing);
+  } else if (!existing) {
+    toast(`✨ ${monName(enc)} joins ${playerName(owner)}'s team under the shiny clause!`);
+  }
   return true;
 }
 
@@ -1315,6 +1548,9 @@ function openSettings() {
   form.game.value = state.meta.game || '';
   form.playerCount.value = String(Math.max(2, state.players.length));
   form.uniqueTypes.checked = state.meta.uniqueTypes !== false;
+  form.shinyClause.checked = state.meta.shinyClause !== false;
+  form.levelCaps.value = state.meta.levelCaps || '';
+  form.levelCaps.placeholder = leagueSteps().map((s) => s.cap ?? '?').join(', ');
   $('#player-name-fields').innerHTML = '';
   renderPlayerNameFields(Number(form.playerCount.value));
   $('#settings-dialog').showModal();
@@ -1333,6 +1569,8 @@ function saveSettings() {
       runName: form.runName.value.trim() || 'Soul Link',
       game: form.game.value.trim(),
       uniqueTypes: form.uniqueTypes.checked,
+      shinyClause: form.shinyClause.checked,
+      levelCaps: form.levelCaps.value.trim(),
     },
   };
   for (let i = 0; i < count; i++) {
@@ -1475,8 +1713,19 @@ function handleAction(action, id, button) {
   const link = state.links.find((l) => l.id === id);
   switch (action) {
     case 'add': return openLinkDialog(null);
-    case 'edit': return openLinkDialog(link);
-    case 'kill': return openLinkDialog(link, 'dead', button.dataset.player);
+    case 'edit': return isShinyCatch(link) ? openShinyDialog(link) : openLinkDialog(link);
+    case 'kill': return isShinyCatch(link) ? openShinyDialog(link, 'dead') : openLinkDialog(link, 'dead', button.dataset.player);
+    case 'open-shiny': return openShinyDialog(null);
+    case 'delete-shiny': {
+      const target = state.links.find((l) => l.id === shinyEditing);
+      if (target && confirm('Delete this shiny catch for everyone?')) {
+        store.write({ [`links/${target.id}`]: null });
+        $('#shiny-dialog').close();
+        undoToast('Shiny catch deleted.', target);
+      }
+      return;
+    }
+    case 'set-badges': return store.write({ 'meta/badges': Number(button.dataset.count) });
     case 'add-catch': return openCatchDialog(id, button.dataset.player);
     case 'to-party': return sendToParty(id, button.dataset.player);
     case 'to-box': return movePokemon([{ linkId: id, playerId: button.dataset.player, inParty: false }]);
@@ -1496,8 +1745,10 @@ function handleAction(action, id, button) {
     case 'close-dialog': return document.querySelector('dialog[open]')?.close();
     case 'delete-link':
       if (editingId && confirm('Delete this encounter for everyone?')) {
+        const target = state.links.find((l) => l.id === editingId);
         store.write({ [`links/${editingId}`]: null });
         $('#link-dialog').close();
+        if (target) undoToast('Encounter deleted.', target);
       }
       return;
     case 'reset':
@@ -1525,6 +1776,22 @@ function bindRunEvents() {
     event.preventDefault();
     saveLinkForm();
     $('#link-dialog').close();
+  });
+  $('#shiny-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (saveShiny()) $('#shiny-dialog').close();
+  });
+  $('#shiny-form').owner.addEventListener('change', () => renderShinyFields());
+  $('#shiny-form').status.addEventListener('change', updateShinyDeath);
+  $('#shiny-form').locationPick.addEventListener('change', () => onLocationPicked($('#shiny-form'), () => renderShinyFields()));
+  $('#shiny-form').location.addEventListener('change', () => renderShinyFields());
+  // N opens a new encounter when nothing else has focus.
+  document.addEventListener('keydown', (event) => {
+    if (event.key.toLowerCase() !== 'n' || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (document.querySelector('dialog[open]') || event.target.closest('input, textarea, select, [contenteditable]')) return;
+    if (!state.exists) return;
+    event.preventDefault();
+    openLinkDialog(null);
   });
   $('#catch-form').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -1563,7 +1830,8 @@ function bindRunEvents() {
       next?.focus();
     }
   });
-  $('#link-form').locationPick.addEventListener('change', onLocationPicked);
+  $('#link-form').locationPick.addEventListener('change', () => onLocationPicked($('#link-form'),
+    () => renderLinkPlayerFields(state.links.find((l) => l.id === editingId), { keepEntries: true })));
   $('#link-form').location.addEventListener('change', () => {
     if ($('#link-form').locationPick.value === OTHER_LOCATION) {
       renderLinkPlayerFields(state.links.find((l) => l.id === editingId), { keepEntries: true });

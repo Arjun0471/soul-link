@@ -82,6 +82,7 @@
             <p class="eyebrow" id="run-game"></p>
             <h1 id="run-name">Soul Link</h1>
             <div class="players" id="run-players"></div>
+            <div class="progress" id="run-progress"></div>
           </div>
           <nav class="toolbar">
             <button type="button" class="primary" data-action="add" data-icon="plus">Encounter</button>
@@ -103,7 +104,9 @@
 
     <nav class="section-nav" id="section-nav" hidden>
       <button type="button" data-action="jump" data-target="sec-teams">Teams</button>
-      <button type="button" data-action="jump" data-target="sec-alive">Alive <span class="count" id="nav-alive"></span></button>
+      <button type="button" data-action="jump" data-target="sec-waiting" id="nav-btn-waiting" hidden>Waiting <span class="count" id="nav-waiting"></span></button>
+      <button type="button" data-action="jump" data-target="sec-alive">Linked <span class="count" id="nav-alive"></span></button>
+      <button type="button" data-action="jump" data-target="sec-shiny" id="nav-btn-shiny" hidden>✨ Shinies <span class="count" id="nav-shiny"></span></button>
       <button type="button" data-action="jump" data-target="sec-dead">Graveyard <span class="count" id="nav-dead"></span></button>
       <button type="button" data-action="jump" data-target="sec-missed">Failed <span class="count" id="nav-missed"></span></button>
     </nav>
@@ -124,12 +127,23 @@
           <h2 data-icon="ball">Teams</h2>
           <div class="teams" id="parties"></div>
         </section>
+        <section class="group waiting" id="sec-waiting" hidden>
+          <h2 data-icon="plus">Waiting on a partner <span class="count" id="count-waiting"></span></h2>
+          <p class="section-hint">Only one of you has caught something here so far. Add the other half to complete the link.</p>
+          <div class="cards" id="list-waiting"></div>
+        </section>
         <section class="group" id="sec-alive">
           <h2 data-icon="link">Linked encounters <span class="count" id="count-alive"></span></h2>
           <div class="cards" id="list-alive"></div>
         </section>
+        <section class="group shinies" id="sec-shiny" hidden>
+          <h2>✨ Shiny clause catches <span class="count" id="count-shiny"></span></h2>
+          <p class="section-hint">Free extra catches: not linked to a partner and they don't use up a route.</p>
+          <div class="cards" id="list-shiny"></div>
+        </section>
         <section class="group graveyard" id="sec-dead">
           <h2 data-icon="grave">Graveyard <span class="count" id="count-dead"></span></h2>
+          <p class="dead-tally" id="dead-tally" hidden></p>
           <div class="cards" id="list-dead"></div>
         </section>
         <section class="group" id="sec-missed">
@@ -143,6 +157,7 @@
   <dialog id="link-dialog">
     <form id="link-form" method="dialog">
       <h2 id="link-dialog-title">Add encounter</h2>
+      <button type="button" class="shiny-entry" id="shiny-entry" data-action="open-shiny" hidden>✨ Found a shiny? <strong>Add it under the shiny clause</strong><span class="muted">Not linked · doesn't use the route</span></button>
       <div id="incomplete-pairs" class="incomplete-pairs" hidden></div>
       <label>Location
         <select name="locationPick" hidden></select>
@@ -193,6 +208,13 @@
         </select>
       </label>
       <div id="player-name-fields"></div>
+      <label>Level caps <span class="muted">(one per gym, then the League; blank uses the defaults)</span>
+        <input name="levelCaps" autocomplete="off" inputmode="numeric">
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="shinyClause">
+        Shiny clause: shinies are free extra catches, not linked to a partner
+      </label>
       <label class="checkbox">
         <input type="checkbox" name="uniqueTypes">
         Warn when a player's party has two Pokémon sharing a primary type
@@ -214,14 +236,64 @@
       <label>Nickname
         <input name="nickname" autocomplete="off">
       </label>
-      <label class="checkbox">
-        <input type="checkbox" name="inParty">
-        <span id="catch-party-label">In party</span>
-      </label>
+      <div class="row">
+        <label class="checkbox">
+          <input type="checkbox" name="inParty">
+          <span id="catch-party-label">In party</span>
+        </label>
+        <label class="checkbox shiny-check">
+          <input type="checkbox" name="shiny">
+          ✨ Shiny
+        </label>
+      </div>
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="button" data-action="close-dialog">Cancel</button>
         <button type="submit" class="primary" data-icon="plus">Add catch</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="shiny-dialog">
+    <form id="shiny-form" method="dialog">
+      <h2 id="shiny-title">Shiny clause catch</h2>
+      <p class="muted shiny-rules">✨ Shinies can be caught anywhere, don't use up the route and aren't soul-linked. If it faints, only it is lost.</p>
+      <div class="row">
+        <label>Found by
+          <select name="owner"></select>
+        </label>
+        <label>Where
+          <select name="locationPick" hidden></select>
+          <input name="location" placeholder="Location (optional)" autocomplete="off">
+        </label>
+      </div>
+      <div id="shiny-species"></div>
+      <div class="row">
+        <label>Nickname
+          <input name="nickname" autocomplete="off">
+        </label>
+        <label class="checkbox party-check">
+          <input type="checkbox" name="inParty">
+          <span id="shiny-party-label">In party</span>
+        </label>
+      </div>
+      <label>Status
+        <select name="status">
+          <option value="alive">Alive</option>
+          <option value="dead">Fainted</option>
+        </select>
+      </label>
+      <label class="shiny-death">Cause of death
+        <input name="cause" autocomplete="off">
+      </label>
+      <label>Notes
+        <textarea name="notes" rows="2"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="danger" data-action="delete-shiny">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="primary">Save shiny</button>
       </div>
     </form>
   </dialog>
